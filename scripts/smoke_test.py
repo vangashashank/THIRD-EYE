@@ -20,12 +20,13 @@ def main():
     print()
 
     if torch.cuda.is_available():
-print("Device: CUDA")
-    print("GPU:", torch.cuda.get_device_name(0))
-elif torch.backends.mps.is_available():
-    print("Device: MPS / Apple Silicon")
-else:
-    print("Device: CPU")
+        print("Device: CUDA")
+        print("GPU:", torch.cuda.get_device_name(0))
+    elif torch.backends.mps.is_available():
+        print("Device: MPS / Apple Silicon")
+    else:
+        print("Device: CPU")
+
     print()
     print("Environment OK")
 
