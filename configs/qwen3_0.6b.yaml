@@ -1,0 +1,19 @@
+model:
+  name: "Qwen/Qwen3-0.6B"
+
+lora:
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "v_proj"
+
+training:
+  epochs: 2
+  batch_size: 1
+  learning_rate: 0.0001
+  max_length: 32
+
+output:
+  adapter_path: "outputs/adapters/task2_final"
