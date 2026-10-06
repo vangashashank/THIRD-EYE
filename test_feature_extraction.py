@@ -44,7 +44,7 @@ TRAIN_TEXTS = [
 def main():
     checkpoint_manager = CheckpointManager(checkpoint_root="checkpoints")
 
-    state_id = 0
+    state_id = 2
     candidate_id = 0
 
     parent_path = checkpoint_manager.get_parent(state_id) if hasattr(

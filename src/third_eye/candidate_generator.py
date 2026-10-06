@@ -13,6 +13,17 @@ from src.training.trainer import train_lora
 from src.training.checkpoint import save_adapter
 from src.third_eye.checkpoint_manager import CheckpointManager
 
+from feature_extractor import extract_candidate_features
+from evaluation import evaluate_current_state
+
+RETENTION_TEXTS = [
+    "The capital of France is Paris.",
+    "Water boils at 100 degrees Celsius at sea level.",
+    "She picked up her umbrella before leaving the house.",
+    "The museum opens at nine in the morning.",
+    "He enjoys reading mystery novels on weekends.",
+    "The train was delayed by twenty minutes.",
+]
 
 class CandidateGenerator:
     def __init__(
@@ -55,6 +66,27 @@ class CandidateGenerator:
 
         print("Parent adapter:", parent)
         print("Base model:", base_model_name)
+
+        # Evaluate current-state performance ONCE per state, before any
+        # candidates are built — shared across all 3 candidates, not per-candidate.
+        print("\nEvaluating current-state performance (target/OOD/retention)...")
+
+        eval_base_model, eval_tokenizer, eval_device = load_model_and_tokenizer(base_model_name)
+        eval_model = PeftModel.from_pretrained(eval_base_model, str(parent), is_trainable=False)
+        eval_model.to(eval_device)
+
+        state_performance = evaluate_current_state(eval_model, eval_tokenizer, eval_device)
+        state_performance["state_id"] = state_id
+
+        perf_path = Path("outputs/state_performance.jsonl")
+        perf_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(perf_path, "a") as f:
+            f.write(json.dumps(state_performance) + "\n")
+
+        print("Current-state performance:", state_performance)
+
+        del eval_model, eval_base_model, eval_tokenizer
+        gc.collect()
 
         temporary_root = Path(temporary_root)
         temporary_root.mkdir(parents=True, exist_ok=True)
@@ -108,6 +140,16 @@ class CandidateGenerator:
             )
 
             model.to(device)
+
+            extract_candidate_features(
+                model=model,
+                tokenizer=tokenizer,
+                device=device,
+                train_texts=texts,
+                retention_texts=RETENTION_TEXTS,
+                state_id=state_id,
+                candidate_id=candidate_id,
+                )
 
             # 3. Build training dataset
             dataset = TextDataset(
