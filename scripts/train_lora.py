@@ -32,7 +32,10 @@ with open(CONFIG_PATH, "r") as file:
 model_name = config["model"]["name"]
 
 model, tokenizer, device = load_model_and_tokenizer(
-    model_name
+    model_name,
+    quantization=config["model"].get("quantization"),
+    local_files_only=config["model"].get("local_files_only", False),
+    revision=config["model"].get("revision"),
 )
 
 

@@ -2,16 +2,18 @@ from pathlib import Path
 import gc
 import json
 import random
-import shutil
+import hashlib
 
 import torch
-from peft import PeftModel
+from safetensors.torch import load_file
 from src.third_eye.state_manager import StateManager
 
 from src.data.dataset import TextDataset
 from src.models.model_loader import load_model_and_tokenizer
 from src.training.trainer import train_lora
-from src.training.checkpoint import save_adapter
+from src.training.checkpoint import (
+    save_adapter, load_adapter, adapter_state_digest, adapter_state_sha256,
+)
 from src.third_eye.checkpoint_manager import CheckpointManager
 
 
@@ -20,11 +22,15 @@ class CandidateGenerator:
         self,
         checkpoint_manager: CheckpointManager,
         k_candidates: int = 3,
-	 metadata_file="outputs/candidate_metadata.jsonl",
+        metadata_file="outputs/candidate_metadata.jsonl",
+        model_load_options=None,
     ):
         self.checkpoint_manager = checkpoint_manager
         self.k_candidates = k_candidates
         self.metadata_file = metadata_file
+        if k_candidates not in (1, 2, 3):
+            raise ValueError("Expected one to three candidates")
+        self.model_load_options = dict(model_load_options or {})
 
     def _get_base_model_name(self, parent_path):
         adapter_config_path = Path(parent_path) / "adapter_config.json"
@@ -48,10 +54,10 @@ class CandidateGenerator:
         epochs: int = 1,
         batch_size: int = 1,
         learning_rate: float = 1e-4,
-	max_length: int = 128,
-	temporary_root="outputs/candidate_work",
-	run_id=None,
-	trajectory_id=None,
+        max_length: int = 128,
+        temporary_root="outputs/candidate_work",
+        run_id=None,
+        trajectory_id=None,
     ):
         if (run_id is None) != (trajectory_id is None):
             raise ValueError(
@@ -63,10 +69,13 @@ class CandidateGenerator:
         if run_id is not None:
             proposal_manager = StateManager(
                 checkpoint_manager=self.checkpoint_manager,
-		metadata_file=self.metadata_file,
+                metadata_file=self.metadata_file,
             )
 
         parent = self.checkpoint_manager.get_parent(state_id)
+        parent_weights = parent / "adapter_model.safetensors"
+        parent_file_hash = hashlib.sha256(parent_weights.read_bytes()).hexdigest()
+        parent_state_hash = adapter_state_digest(load_file(str(parent_weights)))
 
         base_model_name = self._get_base_model_name(parent)
 
@@ -97,6 +106,7 @@ class CandidateGenerator:
                     epochs=epochs,
                     max_length=max_length,
                     texts=texts,
+                    parent_weights_sha256=parent_file_hash,
                 )
 
             print("\n--------------------------------")
@@ -115,30 +125,24 @@ class CandidateGenerator:
                 / f"candidate_{candidate_id}"
             )
 
-            if candidate_work_dir.exists():
-                shutil.rmtree(candidate_work_dir)
-
             candidate_work_dir.mkdir(
                 parents=True,
-                exist_ok=True
+                exist_ok=False,
             )
 
             # 1. Load fresh base model
             base_model, tokenizer, device = (
                 load_model_and_tokenizer(
-                    base_model_name
+                    base_model_name, **self.model_load_options,
                 )
             )
 
             # 2. Load SAME parent LoRA adapter
             #    and make it trainable
-            model = PeftModel.from_pretrained(
-                base_model,
-                str(parent),
-                is_trainable=True,
-            )
-
-            model.to(device)
+            model = load_adapter(base_model, parent, device, is_trainable=True)
+            initial_state_hash = adapter_state_sha256(model)
+            if initial_state_hash != parent_state_hash:
+                raise AssertionError("Candidate did not start from the saved parent weights")
 
             # 3. Build training dataset
             dataset = TextDataset(
@@ -176,6 +180,21 @@ class CandidateGenerator:
             generated_candidates.append(
                 saved_candidate
             )
+            if proposal_manager is not None:
+                proposal_manager.record_candidate(
+                    state_id=state_id,
+                    candidate_id=candidate_id,
+                    seed=seed,
+                    training_loss=model.last_training_metrics["mean_training_loss"],
+                    learning_rate=learning_rate,
+                    batch_size=batch_size,
+                    checkpoint_path=str(saved_candidate),
+                    actual_training={
+                        **model.last_training_metrics,
+                        "initial_adapter_state_sha256": initial_state_hash,
+                        "parent_adapter_state_sha256": parent_state_hash,
+                    },
+                )
 
             print(
                 f"Candidate {candidate_id} saved at:"

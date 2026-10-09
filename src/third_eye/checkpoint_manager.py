@@ -11,7 +11,6 @@ class CheckpointManager:
         state_dir = self.checkpoint_root / f"state_{state_id:03d}"
         state_dir.mkdir(parents=True, exist_ok=True)
 
-        (state_dir / "parent").mkdir(exist_ok=True)
         (state_dir / "candidates").mkdir(exist_ok=True)
 
         return state_dir
@@ -21,9 +20,6 @@ class CheckpointManager:
         state_dir = self.create_state_dir(state_id)
 
         destination = state_dir / "parent"
-
-        if destination.exists():
-            shutil.rmtree(destination)
 
         shutil.copytree(source, destination)
 
@@ -38,9 +34,6 @@ class CheckpointManager:
             / "candidates"
             / f"candidate_{candidate_id}"
         )
-
-        if destination.exists():
-            shutil.rmtree(destination)
 
         shutil.copytree(source, destination)
 
@@ -91,9 +84,6 @@ class CheckpointManager:
 
         next_state_dir = self.create_state_dir(next_state_id)
         new_parent = next_state_dir / "parent"
-
-        if new_parent.exists():
-            shutil.rmtree(new_parent)
 
         shutil.copytree(candidate, new_parent)
 

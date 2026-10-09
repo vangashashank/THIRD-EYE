@@ -2,15 +2,13 @@ import random
 from pathlib import Path
 import gc
 import json
-import shutil
 
 import torch
-from peft import PeftModel
 
 from src.data.dataset import TextDataset
 from src.models.model_loader import load_model_and_tokenizer
 from src.training.trainer import train_lora
-from src.training.checkpoint import save_adapter
+from src.training.checkpoint import save_adapter, load_adapter
 from src.evaluation.consequence_evaluator import evaluate_loss
 
 
@@ -20,9 +18,11 @@ class ConsequenceGenerator:
         self,
         output_file="outputs/consequence_labels.jsonl",
         trajectory_root="outputs/trajectory_cache",
+        model_load_options=None,
     ):
         self.output_file = Path(output_file)
         self.trajectory_root = Path(trajectory_root)
+        self.model_load_options = dict(model_load_options or {})
 
         self.output_file.parent.mkdir(
             parents=True,
@@ -123,17 +123,11 @@ class ConsequenceGenerator:
 
         base_model, tokenizer, device = (
             load_model_and_tokenizer(
-                base_model_name
+                base_model_name, **self.model_load_options,
             )
         )
 
-        model = PeftModel.from_pretrained(
-            base_model,
-            str(candidate_path),
-            is_trainable=True,
-        )
-
-        model.to(device)
+        model = load_adapter(base_model, candidate_path, device, is_trainable=True)
 
         validation_dataset = TextDataset(
             texts=validation_texts,
@@ -200,14 +194,9 @@ class ConsequenceGenerator:
             / "t2"
         )
 
-        if descendant_path.exists():
-            shutil.rmtree(
-                descendant_path
-            )
-
         descendant_path.mkdir(
             parents=True,
-            exist_ok=True,
+            exist_ok=False,
         )
 
         save_adapter(
@@ -233,6 +222,8 @@ class ConsequenceGenerator:
                 str(descendant_path),
 
             "horizon": 2,
+            "actual_training": model.last_training_metrics,
+            "evaluation": {"batch_size": batch_size, "max_length": max_length},
         }
 
         with open(
@@ -241,7 +232,7 @@ class ConsequenceGenerator:
         ) as f:
 
             f.write(
-                json.dumps(consequence)
+                json.dumps(consequence, allow_nan=False)
                 + "\n"
             )
 

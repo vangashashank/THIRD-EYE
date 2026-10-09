@@ -33,6 +33,7 @@ class StateManager:
         epochs,
         max_length,
         texts,
+        parent_weights_sha256=None,
     ):
         """Record the proposed update before candidate training."""
         if not run_id or not trajectory_id:
@@ -89,6 +90,8 @@ class StateManager:
             "data_sha256": hashlib.sha256(serialized_texts).hexdigest(),
             "record_type": "pre_update_proposal",
         }
+        if parent_weights_sha256 is not None:
+            record["parent_weights_sha256"] = parent_weights_sha256
 
         path = self.metadata_file.with_name("candidate_proposals.jsonl")
         identity_keys = (
@@ -122,6 +125,7 @@ class StateManager:
         batch_size: int,
         checkpoint_path: str,
         selected: bool = False,
+        actual_training=None,
     ):
 
         record = {
@@ -134,10 +138,12 @@ class StateManager:
             "checkpoint_path": checkpoint_path,
             "selected": selected,
         }
+        if actual_training is not None:
+            record["actual_training"] = actual_training
 
         with open(self.metadata_file, "a") as f:
             f.write(
-                json.dumps(record) + "\n"
+                json.dumps(record, allow_nan=False) + "\n"
             )
 
         return record

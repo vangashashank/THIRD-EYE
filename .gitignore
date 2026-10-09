@@ -35,4 +35,13 @@ checkpoints/*
 
 # Experiment tracking
 wandb/
-scripts/train_lora_smoke.py
+
+# Isolated research/runtime storage (source scripts remain trackable)
+runs/
+hf_cache/
+.code-sync/
+.code-snapshots/
+.runtime-deps/
+.pytest_cache/
+.env.*
+!.env.example

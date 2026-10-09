@@ -1,0 +1,2 @@
+# Optional Linux/CUDA dependency; keep the working environment unchanged.
+bitsandbytes==0.46.1

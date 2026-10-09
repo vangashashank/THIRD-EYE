@@ -1,0 +1,257 @@
+{
+  "run_id": "qwen3_4b_smoke_25765",
+  "smoke_test_only": true,
+  "forecasting_accuracy_validated": false,
+  "job": {
+    "id": 25765,
+    "state": "COMPLETED",
+    "exit_code": "0:0",
+    "partition": "gpu_student",
+    "start_utc": "2026-10-06T07:02:39Z",
+    "end_utc": "2026-10-06T07:05:13Z",
+    "elapsed_seconds": 154,
+    "allocated_cpus": 4,
+    "requested_memory_raw": "33554432K",
+    "allocated_resources_raw": "billing=4,cpu=4,gres/gpu:a100_3g.20gb=1,gres/gpu=1,mem=33554432K,node=1",
+    "batch_max_rss_raw": "2686880K"
+  },
+  "model": {
+    "name": "Qwen/Qwen3-4B",
+    "total_parameters": 4025417216,
+    "trainable_lora_parameters": 2949120,
+    "revision_at_run": null
+  },
+  "gpu": {
+    "name": "NVIDIA A100-SXM4-40GB MIG 3g.20gb",
+    "count": 1,
+    "device_capacity_gib_logged": 19.5,
+    "peak_memory_bytes": null
+  },
+  "parent_config": {
+    "model": {
+      "name": "Qwen/Qwen3-4B"
+    },
+    "lora": {
+      "r": 8,
+      "alpha": 16,
+      "dropout": 0.05,
+      "target_modules": [
+        "q_proj",
+        "v_proj"
+      ]
+    },
+    "training": {
+      "epochs": 1,
+      "batch_size": 1,
+      "learning_rate": 0.0001,
+      "max_length": 128
+    },
+    "output": {
+      "adapter_path": "outputs/qwen3_4b/adapters/parent_smoke"
+    }
+  },
+  "parent_training_mean_logged": 1.8121,
+  "candidate_count": 3,
+  "horizon": 2,
+  "independent_states": 1,
+  "candidates": [
+    {
+      "state_id": 0,
+      "candidate_id": 0,
+      "horizon": 2,
+      "smoke_test_only": true,
+      "metric_type": "full_text_token_mean_loss_reduction",
+      "label_order": [
+        "target",
+        "ood",
+        "retention"
+      ],
+      "labels": [
+        0.3378714919090271,
+        0.1325439214706421,
+        0.3439502716064453
+      ],
+      "parent_losses": {
+        "target": 1.917766034603119,
+        "ood": 1.8631691336631775,
+        "retention": 1.8043450713157654
+      },
+      "t2_losses": {
+        "target": 1.5798945426940918,
+        "ood": 1.7306252121925354,
+        "retention": 1.46039479970932
+      },
+      "parent_checkpoint": "checkpoints/state_000/parent",
+      "t2_checkpoint": "outputs/trajectory_cache/state_000/candidate_0/t2",
+      "max_length": 128,
+      "seed": 11,
+      "candidate_training_mean_logged": 1.7149,
+      "descendant_training_mean_logged": 1.5915,
+      "scalar_labels": {
+        "t1_validation_loss": 1.77573961019516,
+        "t2_validation_loss": 1.5798945426940918,
+        "continuation_loss_reduction": 0.19584506750106812,
+        "t2_rank": 3,
+        "t2_loss_regret": 0.013328731060028076
+      },
+      "evaluation_example_counts": {
+        "target": 2,
+        "ood": 2,
+        "retention": 2
+      },
+      "evaluation_data_sha256": {
+        "target": "0bd7129c1244abe8ef44c5a58498498ca365c27d7a890708a84399b0d0f98e60",
+        "ood": "9fd284fbf973ad0f0a282e35d9bb9e25b059c17333c4e4b0ac6fd9cf16e459ff",
+        "retention": "9e9b64d9d23b7a1ed88c0d847e183b7e5ef1cd50ae7e2eb3065073cc183b2541"
+      }
+    },
+    {
+      "state_id": 0,
+      "candidate_id": 1,
+      "horizon": 2,
+      "smoke_test_only": true,
+      "metric_type": "full_text_token_mean_loss_reduction",
+      "label_order": [
+        "target",
+        "ood",
+        "retention"
+      ],
+      "labels": [
+        0.35096508264541626,
+        0.15608328580856323,
+        0.34295350313186646
+      ],
+      "parent_losses": {
+        "target": 1.917766034603119,
+        "ood": 1.8631691336631775,
+        "retention": 1.8043450713157654
+      },
+      "t2_losses": {
+        "target": 1.5668009519577026,
+        "ood": 1.7070858478546143,
+        "retention": 1.461391568183899
+      },
+      "parent_checkpoint": "checkpoints/state_000/parent",
+      "t2_checkpoint": "outputs/trajectory_cache/state_000/candidate_1/t2",
+      "max_length": 128,
+      "seed": 22,
+      "candidate_training_mean_logged": 1.7191,
+      "descendant_training_mean_logged": 1.6025,
+      "scalar_labels": {
+        "t1_validation_loss": 1.7760556936264038,
+        "t2_validation_loss": 1.5668009519577026,
+        "continuation_loss_reduction": 0.20925474166870117,
+        "t2_rank": 2,
+        "t2_loss_regret": 0.00023514032363891602
+      },
+      "evaluation_example_counts": {
+        "target": 2,
+        "ood": 2,
+        "retention": 2
+      },
+      "evaluation_data_sha256": {
+        "target": "0bd7129c1244abe8ef44c5a58498498ca365c27d7a890708a84399b0d0f98e60",
+        "ood": "9fd284fbf973ad0f0a282e35d9bb9e25b059c17333c4e4b0ac6fd9cf16e459ff",
+        "retention": "9e9b64d9d23b7a1ed88c0d847e183b7e5ef1cd50ae7e2eb3065073cc183b2541"
+      }
+    },
+    {
+      "state_id": 0,
+      "candidate_id": 2,
+      "horizon": 2,
+      "smoke_test_only": true,
+      "metric_type": "full_text_token_mean_loss_reduction",
+      "label_order": [
+        "target",
+        "ood",
+        "retention"
+      ],
+      "labels": [
+        0.3512002229690552,
+        0.13226497173309326,
+        0.34736037254333496
+      ],
+      "parent_losses": {
+        "target": 1.917766034603119,
+        "ood": 1.8631691336631775,
+        "retention": 1.8043450713157654
+      },
+      "t2_losses": {
+        "target": 1.5665658116340637,
+        "ood": 1.7309041619300842,
+        "retention": 1.4569846987724304
+      },
+      "parent_checkpoint": "checkpoints/state_000/parent",
+      "t2_checkpoint": "outputs/trajectory_cache/state_000/candidate_2/t2",
+      "max_length": 128,
+      "seed": 33,
+      "candidate_training_mean_logged": 1.7161,
+      "descendant_training_mean_logged": 1.6141,
+      "scalar_labels": {
+        "t1_validation_loss": 1.7636066675186157,
+        "t2_validation_loss": 1.5665658116340637,
+        "continuation_loss_reduction": 0.197040855884552,
+        "t2_rank": 1,
+        "t2_loss_regret": 0
+      },
+      "evaluation_example_counts": {
+        "target": 2,
+        "ood": 2,
+        "retention": 2
+      },
+      "evaluation_data_sha256": {
+        "target": "0bd7129c1244abe8ef44c5a58498498ca365c27d7a890708a84399b0d0f98e60",
+        "ood": "9fd284fbf973ad0f0a282e35d9bb9e25b059c17333c4e4b0ac6fd9cf16e459ff",
+        "retention": "9e9b64d9d23b7a1ed88c0d847e183b7e5ef1cd50ae7e2eb3065073cc183b2541"
+      }
+    }
+  ],
+  "forecaster": {
+    "initial_training_mse_logged": 0.10191228,
+    "final_training_mse_logged": 0.00005565,
+    "constant_output_mse_floor_logged": 0.00005566,
+    "trainable_parameters": 4931,
+    "history_encoder_used": false,
+    "held_out_evaluation": false,
+    "weights_saved": false,
+    "separate_original_metrics_file": false,
+    "predictions_logged_rounded": [
+      [
+        0.3467,
+        0.1403,
+        0.3448
+      ],
+      [
+        0.3467,
+        0.1403,
+        0.3448
+      ],
+      [
+        0.3467,
+        0.1403,
+        0.3448
+      ]
+    ]
+  },
+  "provenance": {
+    "run_git_revision": null,
+    "later_sync_commit": "6700ed5b0912aed67c1140b989120dddbf11530a",
+    "later_sync_utc": "2026-10-09T15:34:55Z",
+    "later_sync_produced_this_run": false,
+    "source_sha256": {
+      "qwen4b_smoke_25765.log": "d2976a416564249f3942dd73da680c8aff27bc35792204c3a29000a11aa6fb8f",
+      "qwen3_4b.yaml": "74c0ac4d2600995d45b96ff34e80b59e9781207a48e85f27604b0e8884b45b32",
+      "requirements.server.lock.txt": "c09f64051d048b1999a542473279b3685f2e59a0bfcdd56e9b39eabb4c033c35",
+      "consequence_labels.jsonl": "3a849a171ba347067b628cfcec93b1b6d1ce8caad41f774f5ef44e08db11f150",
+      "loss_labels.jsonl": "83d5f2d6530587363ee06722ee3c27dc13e01ca5b08f94fe79d437371aecb057",
+      "multiconsequence_smoke_labels.jsonl": "016ffc0ec0a84e67c679a4c1fa631a48ac2f6774f8439800ba8d09026f9ead6e"
+    },
+    "redacted_log_sha256": "42aa9fb5ca8feed4dcd04f2a74f12db67c2a5295afe366f7e315dd2a4bf1fcb2"
+  },
+  "limitations": [
+    "Tiny arithmetic data and proxy OOD/retention sets, not research accuracy.",
+    "One state, three candidates; identical rounded forecaster predictions match a constant-output baseline.",
+    "No peak GPU memory, original code revision, or forecaster optimizer settings captured.",
+    "No forecaster weights were saved."
+  ]
+}
