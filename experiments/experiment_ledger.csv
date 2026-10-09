@@ -1,2 +1,4 @@
 run_id,run_date_utc,model,job_id,status,elapsed_seconds,evidence_path,notes
 qwen3_4b_smoke_25765,2026-10-06,Qwen/Qwen3-4B,25765,COMPLETED,154,docs/experiments/qwen3_4b_smoke_25765/report.md,Tiny-data LoRA smoke test; constant-output baseline; no forecaster weights; code revision unknown; predates 6700ed5 sync.
+sprint1_preflight_26945,2026-10-09,Qwen/Qwen3-4B cache check,26945,COMPLETED,3,docs/sprint1_report.md,CPU-only storage/environment preflight; 43.415 GB home usage; cached model revision verified.
+sprint1_qlora_26946,2026-10-09,Qwen/Qwen3-4B NF4/bf16,26946,COMPLETED,315,docs/experiments/sprint1_qlora_26946/report.md,Tiny-data pipeline verification; source 833da0c; K=3/H=2; numerical checkpoint/history checks; new forecaster checkpoint retained server-only; constant-output baseline; no validated forecasting accuracy.

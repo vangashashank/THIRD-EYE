@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --gres=gpu:a100_3g.20gb:1
+#SBATCH --gres=gpu:a100_2g.10gb:1
 #SBATCH --time=00:20:00
 #SBATCH --output=logs/sprint1_pilot_%j.log
 

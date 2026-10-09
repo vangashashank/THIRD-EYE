@@ -1,0 +1,572 @@
+{
+  "run_id": "sprint1_qlora_26946",
+  "job_id": "26946",
+  "smoke_test_only": true,
+  "source_commit": "833da0c95e421ece4632174a71ed10e6d8caf129",
+  "start_utc": "2026-10-09T16:24:28.641097+00:00",
+  "end_utc": "2026-10-09T16:28:42.296265+00:00",
+  "k": 3,
+  "horizon": 2,
+  "runtime_seconds": 253.65520360902883,
+  "peak_gpu_allocated_bytes": 4241472000,
+  "peak_gpu_reserved_bytes": 5700059136,
+  "parent_training": {
+    "optimizer_steps": 2,
+    "step_losses": [
+      2.7647721767425537,
+      2.3292219638824463
+    ],
+    "mean_training_loss": 2.5469970703125,
+    "elapsed_seconds": 3.1497056731022894,
+    "peak_gpu_allocated_bytes": 4223285760
+  },
+  "settings": {
+    "model": {
+      "name": "Qwen/Qwen3-4B",
+      "quantization": "nf4",
+      "local_files_only": true,
+      "revision": "1cfa9a7208912126459214e8b04321603b3df60c"
+    },
+    "lora": {
+      "r": 8,
+      "alpha": 16,
+      "dropout": 0.05,
+      "target_modules": [
+        "q_proj",
+        "v_proj"
+      ]
+    },
+    "training": {
+      "epochs": 1,
+      "batch_size": 1,
+      "learning_rate": 0.0001,
+      "max_length": 128
+    },
+    "output": {
+      "adapter_path": "outputs/qwen3_4b/adapters/parent_smoke"
+    }
+  },
+  "adapter_save_reload": {
+    "max_abs_logit_difference": 0,
+    "rtol": 0.0001,
+    "atol": 0.0001,
+    "argmax_equal": true
+  },
+  "rollback": {
+    "max_abs_logit_difference": 0,
+    "rtol": 0.0001,
+    "atol": 0.0001,
+    "argmax_equal": true
+  },
+  "promotion": {
+    "max_abs_logit_difference": 0,
+    "rtol": 0.0001,
+    "atol": 0.0001,
+    "argmax_equal": true,
+    "selected_candidate": 1,
+    "selection_metric": "t1_target_loss"
+  },
+  "parent_unchanged": true,
+  "history": {
+    "applied_transitions": 1,
+    "simulated_t2_excluded": true
+  },
+  "forecaster": {
+    "new_fit": true,
+    "seed": 42,
+    "optimizer": "Adam",
+    "learning_rate": 0.01,
+    "optimizer_steps": 200,
+    "training_rows": 3,
+    "history_used": false,
+    "initial_training_mse": 0.17838478088378906,
+    "final_training_mse": 0.00001643511677684728,
+    "constant_output_mse": 0.000016435098586953245,
+    "held_out_evaluation": false,
+    "feature_schema": {
+      "state": [
+        "parent_target_loss",
+        "parent_ood_loss",
+        "parent_retention_loss"
+      ],
+      "candidate": [
+        "learning_rate_div_1e-4",
+        "epochs",
+        "batch_size",
+        "max_length_div_128"
+      ],
+      "history": [
+        "applied_target_loss_reduction",
+        "applied_ood_loss_reduction",
+        "applied_retention_loss_reduction"
+      ],
+      "labels": [
+        "target",
+        "ood",
+        "retention"
+      ],
+      "horizon": 2
+    },
+    "predictions": [
+      [
+        0.4813684821128845,
+        0.2294064611196518,
+        0.4349643290042877
+      ],
+      [
+        0.4813684821128845,
+        0.2294064611196518,
+        0.4349643290042877
+      ],
+      [
+        0.4813684821128845,
+        0.2294064611196518,
+        0.4349643290042877
+      ]
+    ],
+    "targets": [
+      [
+        0.4764533042907715,
+        0.230704665184021,
+        0.4322012662887573
+      ],
+      [
+        0.4781244993209839,
+        0.23134905099868774,
+        0.4332248568534851
+      ],
+      [
+        0.48952794075012207,
+        0.22617971897125244,
+        0.4394505023956299
+      ]
+    ],
+    "identical_candidate_features": true,
+    "reload_prediction_max_abs_difference": 0,
+    "checkpoint_saved_and_reloaded": true
+  },
+  "status": "PASSED",
+  "slurm": {
+    "state": "COMPLETED",
+    "exit_code": "0:0",
+    "partition": "gpu_student",
+    "start_utc": "2026-10-09T16:23:43Z",
+    "end_utc": "2026-10-09T16:28:58Z",
+    "elapsed_seconds": 315,
+    "allocated_cpus": 4,
+    "requested_host_memory": "32G",
+    "allocated_gpu_count": 1,
+    "gres": "gpu:a100_2g.10gb:1",
+    "batch_max_rss_raw": "2612108K"
+  },
+  "hardware": {
+    "gpu": "NVIDIA A100-SXM4-40GB MIG 2g.10gb",
+    "gpu_capacity_bytes": 10334765056,
+    "cuda_runtime": "12.4",
+    "driver_version": "550.144.03"
+  },
+  "preflight": {
+    "job_id": 26945,
+    "state": "COMPLETED",
+    "exit_code": "0:0",
+    "elapsed_seconds": 3,
+    "python": "3.10.12",
+    "cached_model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+    "cached_weight_files": 3,
+    "bitsandbytes_available": false,
+    "home_usage_bytes": 43415261184,
+    "declared_quota_bytes": 50000000000,
+    "minimum_headroom_bytes": 2000000000
+  },
+  "storage": {
+    "declared_quota_bytes": 50000000000,
+    "before_bytes": 43417399296,
+    "after_bytes": 43994603520
+  },
+  "pre_update_parent": {
+    "record_type": "pre_update_parent_evaluation",
+    "state_id": 0,
+    "losses": {
+      "target": 2.5505465269088745,
+      "ood": 2.1858118772506714,
+      "retention": 2.3525136709213257
+    },
+    "training": {
+      "optimizer_steps": 2,
+      "step_losses": [
+        2.7647721767425537,
+        2.3292219638824463
+      ],
+      "mean_training_loss": 2.5469970703125,
+      "elapsed_seconds": 3.1497056731022894,
+      "peak_gpu_allocated_bytes": 4223285760
+    },
+    "adapter_state_sha256": "e5dd7086b331ed4460cebcd9d5ac12555cb24c06843d291f096aa7b650864b67",
+    "evaluation": {
+      "epochs": 1,
+      "batch_size": 1,
+      "learning_rate": 0.0001,
+      "max_length": 128
+    }
+  },
+  "proposals": [
+    {
+      "run_id": "sprint1_qlora_26946",
+      "trajectory_id": "trajectory_000",
+      "state_id": 0,
+      "candidate_id": 0,
+      "parent_checkpoint": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/checkpoints/state_000/parent",
+      "seed": 11,
+      "learning_rate": 0.0001,
+      "batch_size": 1,
+      "epochs": 1,
+      "max_length": 128,
+      "num_examples": 2,
+      "planned_optimizer_steps": 2,
+      "data_sha256": "d78e6b359d8da29134280078eb861e1ef6a14f4ce2b034d4b6a8cba33ee4f5a6",
+      "record_type": "pre_update_proposal",
+      "parent_weights_sha256": "6e4fc5eabf54c6881b179339d578b8d49ba861e8bb46fd204debcee3b4c296ab"
+    },
+    {
+      "run_id": "sprint1_qlora_26946",
+      "trajectory_id": "trajectory_000",
+      "state_id": 0,
+      "candidate_id": 1,
+      "parent_checkpoint": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/checkpoints/state_000/parent",
+      "seed": 22,
+      "learning_rate": 0.0001,
+      "batch_size": 1,
+      "epochs": 1,
+      "max_length": 128,
+      "num_examples": 2,
+      "planned_optimizer_steps": 2,
+      "data_sha256": "d78e6b359d8da29134280078eb861e1ef6a14f4ce2b034d4b6a8cba33ee4f5a6",
+      "record_type": "pre_update_proposal",
+      "parent_weights_sha256": "6e4fc5eabf54c6881b179339d578b8d49ba861e8bb46fd204debcee3b4c296ab"
+    },
+    {
+      "run_id": "sprint1_qlora_26946",
+      "trajectory_id": "trajectory_000",
+      "state_id": 0,
+      "candidate_id": 2,
+      "parent_checkpoint": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/checkpoints/state_000/parent",
+      "seed": 33,
+      "learning_rate": 0.0001,
+      "batch_size": 1,
+      "epochs": 1,
+      "max_length": 128,
+      "num_examples": 2,
+      "planned_optimizer_steps": 2,
+      "data_sha256": "d78e6b359d8da29134280078eb861e1ef6a14f4ce2b034d4b6a8cba33ee4f5a6",
+      "record_type": "pre_update_proposal",
+      "parent_weights_sha256": "6e4fc5eabf54c6881b179339d578b8d49ba861e8bb46fd204debcee3b4c296ab"
+    }
+  ],
+  "actual_candidates": [
+    {
+      "state_id": 0,
+      "candidate_id": 0,
+      "seed": 11,
+      "training_loss": 2.330776810646057,
+      "learning_rate": 0.0001,
+      "batch_size": 1,
+      "checkpoint_path": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/checkpoints/state_000/candidates/candidate_0",
+      "selected": false,
+      "actual_training": {
+        "optimizer_steps": 2,
+        "step_losses": [
+          2.2542333602905273,
+          2.407320261001587
+        ],
+        "mean_training_loss": 2.330776810646057,
+        "elapsed_seconds": 2.1482725909445435,
+        "peak_gpu_allocated_bytes": 4241472000,
+        "initial_adapter_state_sha256": "e5dd7086b331ed4460cebcd9d5ac12555cb24c06843d291f096aa7b650864b67",
+        "parent_adapter_state_sha256": "e5dd7086b331ed4460cebcd9d5ac12555cb24c06843d291f096aa7b650864b67"
+      }
+    },
+    {
+      "state_id": 0,
+      "candidate_id": 1,
+      "seed": 22,
+      "training_loss": 2.324912190437317,
+      "learning_rate": 0.0001,
+      "batch_size": 1,
+      "checkpoint_path": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/checkpoints/state_000/candidates/candidate_1",
+      "selected": true,
+      "actual_training": {
+        "optimizer_steps": 2,
+        "step_losses": [
+          2.25364351272583,
+          2.3961808681488037
+        ],
+        "mean_training_loss": 2.324912190437317,
+        "elapsed_seconds": 2.1485072849318385,
+        "peak_gpu_allocated_bytes": 4241472000,
+        "initial_adapter_state_sha256": "e5dd7086b331ed4460cebcd9d5ac12555cb24c06843d291f096aa7b650864b67",
+        "parent_adapter_state_sha256": "e5dd7086b331ed4460cebcd9d5ac12555cb24c06843d291f096aa7b650864b67"
+      }
+    },
+    {
+      "state_id": 0,
+      "candidate_id": 2,
+      "seed": 33,
+      "training_loss": 2.3282347917556763,
+      "learning_rate": 0.0001,
+      "batch_size": 1,
+      "checkpoint_path": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/checkpoints/state_000/candidates/candidate_2",
+      "selected": false,
+      "actual_training": {
+        "optimizer_steps": 2,
+        "step_losses": [
+          2.254591464996338,
+          2.4018781185150146
+        ],
+        "mean_training_loss": 2.3282347917556763,
+        "elapsed_seconds": 2.147974394960329,
+        "peak_gpu_allocated_bytes": 4241472000,
+        "initial_adapter_state_sha256": "e5dd7086b331ed4460cebcd9d5ac12555cb24c06843d291f096aa7b650864b67",
+        "parent_adapter_state_sha256": "e5dd7086b331ed4460cebcd9d5ac12555cb24c06843d291f096aa7b650864b67"
+      }
+    }
+  ],
+  "consequences": [
+    {
+      "state_id": 0,
+      "candidate_id": 0,
+      "candidate_checkpoint": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/checkpoints/state_000/candidates/candidate_0",
+      "t1_validation_loss": 2.3266940116882324,
+      "t2_validation_loss": 2.074093222618103,
+      "t2_checkpoint": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/trajectory_cache/state_000/candidate_0/t2",
+      "horizon": 2,
+      "actual_training": {
+        "optimizer_steps": 2,
+        "step_losses": [
+          2.0435731410980225,
+          2.1574740409851074
+        ],
+        "mean_training_loss": 2.100523591041565,
+        "elapsed_seconds": 2.1472550639882684,
+        "peak_gpu_allocated_bytes": 4241472000
+      },
+      "evaluation": {
+        "batch_size": 1,
+        "max_length": 128
+      }
+    },
+    {
+      "state_id": 0,
+      "candidate_id": 1,
+      "candidate_checkpoint": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/checkpoints/state_000/candidates/candidate_1",
+      "t1_validation_loss": 2.3253875970840454,
+      "t2_validation_loss": 2.0724220275878906,
+      "t2_checkpoint": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/trajectory_cache/state_000/candidate_1/t2",
+      "horizon": 2,
+      "actual_training": {
+        "optimizer_steps": 2,
+        "step_losses": [
+          2.0404510498046875,
+          2.154867649078369
+        ],
+        "mean_training_loss": 2.0976593494415283,
+        "elapsed_seconds": 2.1467332360334694,
+        "peak_gpu_allocated_bytes": 4241472000
+      },
+      "evaluation": {
+        "batch_size": 1,
+        "max_length": 128
+      }
+    },
+    {
+      "state_id": 0,
+      "candidate_id": 2,
+      "candidate_checkpoint": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/checkpoints/state_000/candidates/candidate_2",
+      "t1_validation_loss": 2.3263734579086304,
+      "t2_validation_loss": 2.0610185861587524,
+      "t2_checkpoint": "[REDACTED_SERVER_PROJECT]/runs/sprint1_qlora_26946/sprint1_qlora_26946/trajectory_000/trajectory_cache/state_000/candidate_2/t2",
+      "horizon": 2,
+      "actual_training": {
+        "optimizer_steps": 2,
+        "step_losses": [
+          2.266932964324951,
+          1.9511387348175049
+        ],
+        "mean_training_loss": 2.109035849571228,
+        "elapsed_seconds": 2.1488618459552526,
+        "peak_gpu_allocated_bytes": 4241472000
+      },
+      "evaluation": {
+        "batch_size": 1,
+        "max_length": 128
+      }
+    }
+  ],
+  "labels": [
+    {
+      "state_id": 0,
+      "candidate_id": 0,
+      "horizon": 2,
+      "smoke_test_only": true,
+      "parent_losses": {
+        "target": 2.5505465269088745,
+        "ood": 2.1858118772506714,
+        "retention": 2.3525136709213257
+      },
+      "t1_losses": {
+        "target": 2.3266940116882324,
+        "ood": 2.082153558731079,
+        "retention": 2.153548240661621
+      },
+      "t2_losses": {
+        "target": 2.074093222618103,
+        "ood": 1.9551072120666504,
+        "retention": 1.9203124046325684
+      },
+      "label_order": [
+        "target",
+        "ood",
+        "retention"
+      ],
+      "labels": [
+        0.4764533042907715,
+        0.230704665184021,
+        0.4322012662887573
+      ],
+      "evaluation": {
+        "batch_size": 1,
+        "max_length": 128
+      },
+      "evaluation_data_sha256": {
+        "target": "963bc749dd631d77956810f239defa690e91b91d333b2f3f577139371f293365",
+        "ood": "7fec8d386e94678fbb126b62fcaf4c1bc52204d31ee819b5dcf1302f12e1932b",
+        "retention": "5190935fcebc5dc2f3bc9afd5cc84d21a50e3cd4cfae2366eb6edf8951b538d2"
+      },
+      "evaluation_examples_per_set": 2
+    },
+    {
+      "state_id": 0,
+      "candidate_id": 1,
+      "horizon": 2,
+      "smoke_test_only": true,
+      "parent_losses": {
+        "target": 2.5505465269088745,
+        "ood": 2.1858118772506714,
+        "retention": 2.3525136709213257
+      },
+      "t1_losses": {
+        "target": 2.3253875970840454,
+        "ood": 2.081070065498352,
+        "retention": 2.1528340578079224
+      },
+      "t2_losses": {
+        "target": 2.0724220275878906,
+        "ood": 1.9544628262519836,
+        "retention": 1.9192888140678406
+      },
+      "label_order": [
+        "target",
+        "ood",
+        "retention"
+      ],
+      "labels": [
+        0.4781244993209839,
+        0.23134905099868774,
+        0.4332248568534851
+      ],
+      "evaluation": {
+        "batch_size": 1,
+        "max_length": 128
+      },
+      "evaluation_data_sha256": {
+        "target": "963bc749dd631d77956810f239defa690e91b91d333b2f3f577139371f293365",
+        "ood": "7fec8d386e94678fbb126b62fcaf4c1bc52204d31ee819b5dcf1302f12e1932b",
+        "retention": "5190935fcebc5dc2f3bc9afd5cc84d21a50e3cd4cfae2366eb6edf8951b538d2"
+      },
+      "evaluation_examples_per_set": 2
+    },
+    {
+      "state_id": 0,
+      "candidate_id": 2,
+      "horizon": 2,
+      "smoke_test_only": true,
+      "parent_losses": {
+        "target": 2.5505465269088745,
+        "ood": 2.1858118772506714,
+        "retention": 2.3525136709213257
+      },
+      "t1_losses": {
+        "target": 2.3263734579086304,
+        "ood": 2.081335425376892,
+        "retention": 2.1531636714935303
+      },
+      "t2_losses": {
+        "target": 2.0610185861587524,
+        "ood": 1.959632158279419,
+        "retention": 1.9130631685256958
+      },
+      "label_order": [
+        "target",
+        "ood",
+        "retention"
+      ],
+      "labels": [
+        0.48952794075012207,
+        0.22617971897125244,
+        0.4394505023956299
+      ],
+      "evaluation": {
+        "batch_size": 1,
+        "max_length": 128
+      },
+      "evaluation_data_sha256": {
+        "target": "963bc749dd631d77956810f239defa690e91b91d333b2f3f577139371f293365",
+        "ood": "7fec8d386e94678fbb126b62fcaf4c1bc52204d31ee819b5dcf1302f12e1932b",
+        "retention": "5190935fcebc5dc2f3bc9afd5cc84d21a50e3cd4cfae2366eb6edf8951b538d2"
+      },
+      "evaluation_examples_per_set": 2
+    }
+  ],
+  "applied_history": [
+    {
+      "from_state": 0,
+      "to_state": 1,
+      "selected_candidate_id": 1,
+      "before_losses": {
+        "target": 2.5505465269088745,
+        "ood": 2.1858118772506714,
+        "retention": 2.3525136709213257
+      },
+      "after_losses": {
+        "target": 2.3253875970840454,
+        "ood": 2.081070065498352,
+        "retention": 2.1528340578079224
+      },
+      "loss_reductions": [
+        0.2251589298248291,
+        0.10474181175231934,
+        0.19967961311340332
+      ]
+    }
+  ],
+  "forecasting_accuracy_validated": false,
+  "raw_source_sha256": {
+    "candidate_metadata.jsonl": "2004dbebb8dfbf4ee99fbee896463252c77e6300c6eb7be357a622cf8a38c1ec",
+    "candidate_proposals.jsonl": "3c32d4d6478d134e9fb1539983d9d8abb76c49fecfce08499c298b1e11ab802a",
+    "consequence_labels.jsonl": "e661b2eb19a6b8c02430f57b0c9db40d1f2b622bd75e981f1647a02c9bf1c83a",
+    "history.jsonl": "a2292b7e30dec196c276f98d462da6e29d2c6853f49bcd8c918cb13138dfe745",
+    "multiconsequence_labels.jsonl": "192b04543987b69176ab2d0c8a0cd938d931a09634d86925a4b766a79b82c6ed",
+    "parent_metrics.json": "5e417be7e4269aaa0f28447223c906239b3f5dd599a03f2648904697efcb16fd",
+    "provenance.json": "971f3ed4bb0eba06cee81b50e1acaf63d06eed9bc8b0da0949bd6d87996568e8",
+    "run_config.json": "c97d47ecf5c10a9d7f7c4efc254d75c8c16fa9a6c1b4ad8ba5f46ca1615e5658",
+    "summary.json": "384584c8cdcec7ab3259cc4478133ef399d8ebddf8cc8fa2fe1734bee43b728b",
+    "sprint1_pilot_26946.log": "f7ada904085f541a8986f27685e7166cbe7048e3fe1c42f902174d501cb7d4ee",
+    "environment.txt": "717afd13b517d678c394950c0369b0c4b8a59ccc6fa41bacd70d881a339077fa"
+  },
+  "redacted_log_sha256": "4325c5a6f9270bb5da8404f0dd9536c5910e19d3e8b1073dcf3a93de20d8e8bb",
+  "redactions": {
+    "project_path_occurrences_in_log": 28,
+    "home_path_occurrences_in_log": 2,
+    "compute_hostname_occurrences_in_log": 1,
+    "metadata": "Private absolute project paths replaced by [REDACTED_SERVER_PROJECT]."
+  }
+}

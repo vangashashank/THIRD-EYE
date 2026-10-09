@@ -1,18 +1,19 @@
 # Sprint 1 Progress
 
-Status: IN PROGRESS. Last verified baseline: local `main` at `6700ed5`.
+Status: technical target COMPLETE. Final GitHub publication verification is recorded in the handoff.
+Baseline `6700ed5`; new run source `833da0c95e421ece4632174a71ed10e6d8caf129`.
 
 ## Checklist
 
 | Requirement | Status | Evidence / next action |
 | --- | --- | --- |
 | LoRA harness and Qwen3-4B pilot | VERIFIED smoke test | Job 25765 completed 2026-10-06, exit 0:0, 154 seconds; original log and saved labels inspected. |
-| NF4/bf16 QLoRA | IMPLEMENTED / GPU PENDING | Configurable NF4/double-quant/bf16 loader and k-bit preparation; offline loader tests pass. |
-| Adapter save/reload, rollback, promotion | PARTIAL | Saved adapters exist; add numerical prediction comparisons and reject accidental checkpoint overwrites. |
-| Same-parent K=3, H=2, finite complete labels | VERIFIED old smoke test / PENDING new metadata | Three candidate and descendant labels verified; new run must exercise proposal recording and isolation. |
-| Pilot settings and measured memory/runtime | PARTIAL | Old run: batch 1, learning rate 1e-4, rank 8; peak GPU memory was not measured. |
-| Forecaster checkpoint and schema | IMPLEMENTED / GPU LABELS PENDING | Schema-aware save/reload and synthetic prediction round-trip tested. Old run saved no forecaster weights. |
-| Documentation, evidence, GitHub push | IN PROGRESS | Preserve interrupted README/report edits; add original redacted log, actual metrics and environment lock. |
+| NF4/bf16 QLoRA | VERIFIED | Job 26946 completed, NF4/double quantization/bf16 compute. |
+| Adapter save/reload, rollback, promotion | VERIFIED | All three probe-logit max absolute differences 0.0; adapter digests match, parent unchanged; writes reject overwrites. |
+| Same-parent K=3, H=2, finite complete labels | VERIFIED | Job 26946: all initial adapter digests match, proposals before training, actual outcomes, isolated workspace and finite consistent labels. |
+| Pilot settings and measured memory/runtime | VERIFIED | Batch 1, lr 1e-4, rank 8; 315 s Slurm / 253.655 s Python; peak allocated 3.950179 GiB, reserved 5.308594 GiB. |
+| Forecaster checkpoint and schema | VERIFIED | New fit saved/reloaded on server; prediction difference 0.0. Constant-output baseline, no held-out accuracy. Old run saved no forecaster weights. |
+| Documentation, evidence, GitHub push | EVIDENCE COMPLETE / FINAL PUBLICATION | Both reports, actual redacted logs, recorded metrics, dependency locks, README and ledger; compare final HEAD with origin/main after push. |
 
 ## Execution State
 
@@ -27,12 +28,24 @@ Status: IN PROGRESS. Last verified baseline: local `main` at `6700ed5`.
   Compute-node home usage: 43,415,261,184 bytes against the declared 50 GB limit.
   Cached Qwen3-4B revision: `1cfa9a7208912126459214e8b04321603b3df60c`.
   The existing environment has no bitsandbytes; use an isolated optional dependency overlay.
-- No new GPU job submitted yet. Nine offline unit tests, trajectory isolation, Python AST syntax
+- GPU pilot job `26946` submitted using immutable source commit
+  `833da0c95e421ece4632174a71ed10e6d8caf129`; inspect queue and log before any retry.
+  Server source snapshot: `.code-snapshots/833da0c95e421ece4632174a71ed10e6d8caf129/`.
+  Result root: `runs/sprint1_qlora_26946/`; log: `logs/sprint1_pilot_26946.log`.
+  COMPLETED `2026-10-09T16:23:43Z` to `16:28:58Z`, exit `0:0`, 315 seconds;
+  one A100 MIG `2g.10gb`, 4 CPUs, 32 GiB host memory.
+  The pending job's GRES was resized with `scontrol update JobId=26946 Gres=gpu:a100_2g.10gb:1`
+  after the scheduler estimated a multi-day wait for `3g.20gb`. No duplicate job was submitted.
+  Home usage before/after: 43,417,399,296 / 43,994,603,520 bytes. Existing `.venv` was not modified.
+- Ten offline unit tests (including real PEFT synthetic CPU LoRA), trajectory isolation, Python AST syntax
   parsing (44 files), Bash syntax, diff whitespace and credential-pattern checks passed.
 - Old job 25765 evidence is complete; no new measurements are attributed to that run.
+- No Sprint 1 jobs remain running or queued. No corrective retries were needed.
 
 ## Resume
 
 Inspect this file, Git status, Slurm queue and any recorded job logs before submitting a job.
 Use immutable source snapshots for jobs and retain code/config/environment manifests.
-Do not declare Sprint 1 complete until every pending requirement has recorded execution evidence.
+All technical requirements now have evidence in `sprint1_report.md` and the two experiment folders.
+Verify publication with `git fetch origin` and `git rev-parse HEAD origin/main` before relying on remote state.
+Next: independent multi-state Sprint 2 evaluation protocol; no full study has been started.

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import torch
+from transformers import Qwen3Config, Qwen3ForCausalLM
 
 from scripts.fit_direct_forecaster import fit_forecaster
 from src.models import model_loader, lora_model
@@ -15,11 +16,32 @@ from src.third_eye.direct_forecaster import ThirdEyeDirect
 from src.third_eye.forecaster_checkpoint import save_forecaster, load_forecaster
 from src.third_eye.history_store import HistoryStore
 from src.third_eye.run_workspace import create_trajectory_workspace
-from src.training.checkpoint import adapter_state_digest, save_adapter
+from src.training.checkpoint import adapter_state_digest, adapter_state_sha256, save_adapter, load_adapter
 from src.training.trainer import train_lora
 
 
 class SprintOneTests(unittest.TestCase):
+    def test_real_peft_lora_roundtrip_on_synthetic_cpu_model(self):
+        config = Qwen3Config(vocab_size=32, hidden_size=16, intermediate_size=32, head_dim=8,
+                             num_hidden_layers=1, num_attention_heads=2,
+                             num_key_value_heads=2, max_position_embeddings=16)
+        torch.manual_seed(17)
+        model = lora_model.attach_lora(Qwen3ForCausalLM(config), r=2, alpha=4, dropout=0.)
+        inputs = torch.tensor([[1, 2, 3, 4]])
+        data = [dict(input_ids=inputs[0], attention_mask=torch.ones(4, dtype=torch.long),
+                     labels=inputs[0].clone())]
+        train_lora(model, data, torch.device("cpu"))
+        model.eval()
+        with tempfile.TemporaryDirectory() as root, torch.no_grad():
+            expected = model(input_ids=inputs).logits
+            digest = adapter_state_sha256(model)
+            save_adapter(model, MagicMock(), Path(root) / "adapter")
+            torch.manual_seed(17)
+            restored = load_adapter(Qwen3ForCausalLM(config), Path(root) / "adapter", torch.device("cpu"))
+            restored.eval()
+            self.assertEqual(digest, adapter_state_sha256(restored))
+            self.assertTrue(torch.equal(expected, restored(input_ids=inputs).logits))
+
     def test_training_outcomes_and_finite_guard(self):
         class SyntheticModel(torch.nn.Module):
             def __init__(self, finite=True):

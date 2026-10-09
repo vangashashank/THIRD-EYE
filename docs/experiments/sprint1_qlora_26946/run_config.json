@@ -1,0 +1,26 @@
+{
+  "model": {
+    "name": "Qwen/Qwen3-4B",
+    "quantization": "nf4",
+    "local_files_only": true,
+    "revision": "1cfa9a7208912126459214e8b04321603b3df60c"
+  },
+  "lora": {
+    "r": 8,
+    "alpha": 16,
+    "dropout": 0.05,
+    "target_modules": [
+      "q_proj",
+      "v_proj"
+    ]
+  },
+  "training": {
+    "epochs": 1,
+    "batch_size": 1,
+    "learning_rate": 0.0001,
+    "max_length": 128
+  },
+  "output": {
+    "adapter_path": "outputs/qwen3_4b/adapters/parent_smoke"
+  }
+}
