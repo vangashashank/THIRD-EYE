@@ -1,3 +1,5 @@
+import hashlib
+import math
 import json
 from pathlib import Path
 
@@ -17,6 +19,98 @@ class StateManager:
             parents=True,
             exist_ok=True,
         )
+    def record_proposal(
+        self,
+        *,
+        run_id,
+        trajectory_id,
+        state_id,
+        candidate_id,
+        parent_checkpoint,
+        seed,
+        learning_rate,
+        batch_size,
+        epochs,
+        max_length,
+        texts,
+    ):
+        """Record the proposed update before candidate training."""
+        if not run_id or not trajectory_id:
+            raise ValueError("Run and trajectory IDs are required.")
+
+        for name, value in (
+            ("state_id", state_id),
+            ("candidate_id", candidate_id),
+            ("seed", seed),
+        ):
+            if type(value) is not int or value < 0:
+                raise ValueError(f"Invalid {name}.")
+
+        for name, value in (
+            ("batch_size", batch_size),
+            ("epochs", epochs),
+            ("max_length", max_length),
+        ):
+            if type(value) is not int or value <= 0:
+                raise ValueError(f"Invalid {name}.")
+
+        if (
+            not math.isfinite(learning_rate)
+            or learning_rate <= 0
+        ):
+            raise ValueError("Invalid learning rate.")
+
+        if (
+            not isinstance(texts, (list, tuple))
+            or not texts
+            or any(not isinstance(t, str) or not t.strip() for t in texts)
+        ):
+            raise ValueError("Expected a nonempty sequence of texts.")
+
+        serialized_texts = json.dumps(
+            list(texts), ensure_ascii=False
+        ).encode("utf-8")
+
+        record = {
+            "run_id": str(run_id),
+            "trajectory_id": str(trajectory_id),
+            "state_id": state_id,
+            "candidate_id": candidate_id,
+            "parent_checkpoint": str(parent_checkpoint),
+            "seed": seed,
+            "learning_rate": learning_rate,
+            "batch_size": batch_size,
+            "epochs": epochs,
+            "max_length": max_length,
+            "num_examples": len(texts),
+            "planned_optimizer_steps": (
+                (len(texts) + batch_size - 1) // batch_size
+            ) * epochs,
+            "data_sha256": hashlib.sha256(serialized_texts).hexdigest(),
+            "record_type": "pre_update_proposal",
+        }
+
+        path = self.metadata_file.with_name("candidate_proposals.jsonl")
+        identity_keys = (
+            "run_id", "trajectory_id", "state_id", "candidate_id"
+        )
+
+        if path.exists():
+            with path.open() as file:
+                for line in file:
+                    if not line.strip():
+                        continue
+                    previous = json.loads(line)
+                    if all(
+                        previous[key] == record[key]
+                        for key in identity_keys
+                    ):
+                        raise ValueError("Proposal already recorded.")
+
+        with path.open("a") as file:
+            file.write(json.dumps(record, allow_nan=False) + "\n")
+
+        return record
 
     def record_candidate(
         self,

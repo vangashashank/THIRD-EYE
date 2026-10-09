@@ -1,0 +1,15 @@
+{
+  "smoke_test_only": true,
+  "target": [
+    "Question: What is 6 + 2?\nAnswer: 8",
+    "Question: What is 9 - 4?\nAnswer: 5"
+  ],
+  "ood": [
+    "Question: What is 3 * 4?\nAnswer: 12",
+    "Question: What is 5 * 2?\nAnswer: 10"
+  ],
+  "retention": [
+    "Question: What is 7 + 4?\nAnswer: 11",
+    "Question: What is 12 - 5?\nAnswer: 7"
+  ]
+}

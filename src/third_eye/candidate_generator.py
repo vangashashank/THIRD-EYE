@@ -6,6 +6,7 @@ import shutil
 
 import torch
 from peft import PeftModel
+from src.third_eye.state_manager import StateManager
 
 from src.data.dataset import TextDataset
 from src.models.model_loader import load_model_and_tokenizer
@@ -19,9 +20,11 @@ class CandidateGenerator:
         self,
         checkpoint_manager: CheckpointManager,
         k_candidates: int = 3,
+	 metadata_file="outputs/candidate_metadata.jsonl",
     ):
         self.checkpoint_manager = checkpoint_manager
         self.k_candidates = k_candidates
+        self.metadata_file = metadata_file
 
     def _get_base_model_name(self, parent_path):
         adapter_config_path = Path(parent_path) / "adapter_config.json"
@@ -45,9 +48,23 @@ class CandidateGenerator:
         epochs: int = 1,
         batch_size: int = 1,
         learning_rate: float = 1e-4,
-        max_length: int = 128,
-        temporary_root="outputs/candidate_work",
+	max_length: int = 128,
+	temporary_root="outputs/candidate_work",
+	run_id=None,
+	trajectory_id=None,
     ):
+        if (run_id is None) != (trajectory_id is None):
+            raise ValueError(
+                "Provide both run_id and trajectory_id, or neither."
+            )
+
+        proposal_manager = None
+
+        if run_id is not None:
+            proposal_manager = StateManager(
+                checkpoint_manager=self.checkpoint_manager,
+		metadata_file=self.metadata_file,
+            )
 
         parent = self.checkpoint_manager.get_parent(state_id)
 
@@ -67,6 +84,20 @@ class CandidateGenerator:
         for candidate_id in range(self.k_candidates):
 
             seed = seeds[candidate_id]
+            if proposal_manager is not None:
+                proposal_manager.record_proposal(
+                    run_id=run_id,
+                    trajectory_id=trajectory_id,
+                    state_id=state_id,
+                    candidate_id=candidate_id,
+                    parent_checkpoint=parent,
+                    seed=seed,
+                    learning_rate=learning_rate,
+                    batch_size=batch_size,
+                    epochs=epochs,
+                    max_length=max_length,
+                    texts=texts,
+                )
 
             print("\n--------------------------------")
             print(

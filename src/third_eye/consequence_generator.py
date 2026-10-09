@@ -19,13 +19,16 @@ class ConsequenceGenerator:
     def __init__(
         self,
         output_file="outputs/consequence_labels.jsonl",
+        trajectory_root="outputs/trajectory_cache",
     ):
         self.output_file = Path(output_file)
+        self.trajectory_root = Path(trajectory_root)
 
         self.output_file.parent.mkdir(
             parents=True,
             exist_ok=True,
         )
+
 
     def _get_base_model_name(
         self,
@@ -191,8 +194,7 @@ class ConsequenceGenerator:
 
         # Save simulated descendant
         descendant_path = (
-            Path("outputs")
-            / "trajectory_cache"
+            self.trajectory_root
             / f"state_{state_id:03d}"
             / f"candidate_{candidate_id}"
             / "t2"

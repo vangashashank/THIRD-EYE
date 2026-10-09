@@ -1,3 +1,4 @@
+import argparse
 import yaml
 
 from src.models.model_loader import load_model_and_tokenizer
@@ -7,8 +8,14 @@ from src.training.trainer import train_lora
 from src.training.checkpoint import save_adapter
 
 
-CONFIG_PATH = "configs/qwen3_0.6b.yaml"
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--config",
+    default="configs/qwen3_0.6b.yaml",
+)
+args = parser.parse_args()
 
+CONFIG_PATH = args.config
 
 # --------------------------------------------------
 # 1. Load config

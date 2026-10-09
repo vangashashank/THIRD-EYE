@@ -35,5 +35,4 @@ checkpoints/*
 
 # Experiment tracking
 wandb/
-scripts/test_*.py
 scripts/train_lora_smoke.py
