@@ -1,0 +1,200 @@
+# =============================================================================
+# THIRD EYE — FROZEN FEATURE SCHEMA (Mahitha's Sep 30 deliverable)
+# =============================================================================
+# This is the contract between:
+#   - Shashank's training harness (produces these values per candidate update)
+#   - Mahitha's forecaster models (H1 baseline, Third Eye-Direct, Dynamics)
+#
+# Rule: once frozen (after the Sep 30 pilot), do not change field names or
+# shapes without re-syncing with Shashank — every downstream model depends
+# on this exact ordering and dimensionality.
+#
+# "per_candidate" features are computed once per candidate update U_t^k.
+# "per_state" features are computed once per recursive state S_t and shared
+# across all K=3 candidates at that state.
+# =============================================================================
+
+schema_version: "0.1-pilot"
+frozen_on: null   # set to actual date once locked after Sep 30 pilot
+
+# -----------------------------------------------------------------------------
+# 1. CURRENT-STATE PERFORMANCE (per_state)
+# -----------------------------------------------------------------------------
+current_state_performance:
+  scope: per_state
+  fields:
+    - name: target_val_accuracy
+      dtype: float32
+      shape: [1]
+      description: Current model's accuracy on target-task validation split.
+    - name: ood_proxy_accuracy
+      dtype: float32
+      shape: [1]
+      description: Current model's accuracy on a cheap OOD proxy subset.
+    - name: retention_anchor_accuracy
+      dtype: float32
+      shape: [1]
+      description: Current model's accuracy on the fixed 256-example retention anchor.
+    - name: gen_confidence_mean
+      dtype: float32
+      shape: [1]
+      description: Mean generation confidence (e.g. mean token logprob) over a probe set.
+    - name: gen_confidence_std
+      dtype: float32
+      shape: [1]
+      description: Std of generation confidence over the same probe set.
+
+# -----------------------------------------------------------------------------
+# 2. CANDIDATE DATA STATISTICS (per_candidate)
+# -----------------------------------------------------------------------------
+candidate_data_stats:
+  scope: per_candidate
+  fields:
+    - name: token_length_mean
+      dtype: float32
+      shape: [1]
+    - name: token_length_std
+      dtype: float32
+      shape: [1]
+    - name: pre_update_nll
+      dtype: float32
+      shape: [1]
+      description: Mean NLL of the current model on the candidate batch before update.
+    - name: mean_confidence
+      dtype: float32
+      shape: [1]
+      description: Mean model confidence on its own corrected answers in this batch.
+    - name: verifier_pass_rate
+      dtype: float32
+      shape: [1]
+      description: Fraction of attempted corrections that passed the deterministic verifier.
+    - name: difficulty_proxy
+      dtype: float32
+      shape: [1]
+      description: Proxy difficulty score (e.g. original failure rate on these examples).
+    - name: embedding_diversity
+      dtype: float32
+      shape: [1]
+      description: Mean pairwise cosine distance of example embeddings in the batch.
+    - name: duplicate_rate
+      dtype: float32
+      shape: [1]
+      description: Fraction of near-duplicate examples in the batch.
+
+# -----------------------------------------------------------------------------
+# 3. GRADIENT / INTERFERENCE STATISTICS (per_candidate)
+# -----------------------------------------------------------------------------
+gradient_interference_stats:
+  scope: per_candidate
+  fields:
+    - name: grad_norm
+      dtype: float32
+      shape: [1]
+      description: L2 norm of the LoRA gradient on the candidate batch.
+    - name: grad_cosine_retention
+      dtype: float32
+      shape: [1]
+      description: Cosine similarity between candidate gradient and a small retention-anchor gradient.
+    - name: layerwise_grad_norms
+      dtype: float32
+      shape: [num_lora_layers]     # fixed once LoRA rank/placement is frozen post-pilot
+      description: Per-layer LoRA gradient norms.
+    - name: sign_agreement
+      dtype: float32
+      shape: [1]
+      description: Fraction of LoRA parameters where candidate-grad and retention-grad signs agree.
+
+# -----------------------------------------------------------------------------
+# 4. SHORT-PROBE DYNAMICS (per_candidate) — from a 10-20 step probe run
+# -----------------------------------------------------------------------------
+short_probe_dynamics:
+  scope: per_candidate
+  probe_steps: 15        # frozen default; pilot may adjust to 10-20
+  fields:
+    - name: train_loss_slope
+      dtype: float32
+      shape: [1]
+      description: Linear-fit slope of training loss over the probe steps.
+    - name: anchor_loss_slope
+      dtype: float32
+      shape: [1]
+      description: Linear-fit slope of loss on retention-anchor prompts over the probe steps.
+    - name: kl_drift_anchor
+      dtype: float32
+      shape: [1]
+      description: KL divergence between pre-probe and post-probe output distributions on anchor prompts.
+    - name: lora_delta_norm
+      dtype: float32
+      shape: [1]
+      description: L2 norm of LoRA weight change after the probe.
+    - name: val_loss_slope
+      dtype: float32
+      shape: [1]
+      description: Linear-fit slope of a small target-validation loss sample over the probe steps.
+
+# -----------------------------------------------------------------------------
+# 5. RECURSIVE HISTORY (per_state) — last 1-3 rounds, padded if fewer exist
+# -----------------------------------------------------------------------------
+recursive_history:
+  scope: per_state
+  history_len: 3          # pad with zeros + mask for t < 3
+  fields:
+    - name: prev_accepted_value
+      dtype: float32
+      shape: [history_len]
+      description: LHV of the update accepted at each of the last up-to-3 rounds.
+    - name: current_gen_index
+      dtype: int32
+      shape: [1]
+      description: t, the current recursive generation index (0-indexed).
+    - name: prev_target_change
+      dtype: float32
+      shape: [history_len]
+    - name: prev_ood_change
+      dtype: float32
+      shape: [history_len]
+    - name: prev_retention_change
+      dtype: float32
+      shape: [history_len]
+    - name: history_mask
+      dtype: float32
+      shape: [history_len]
+      description: 1.0 where a real history entry exists, 0.0 for padding.
+
+# -----------------------------------------------------------------------------
+# LABELS (meta-labels, per_candidate) — produced only during expensive labeling
+# runs; used to train the forecasters, never available at inference/ranking time.
+# -----------------------------------------------------------------------------
+labels:
+  scope: per_candidate
+  fields:
+    - name: delta_target_h1
+      dtype: float32
+      shape: [1]
+      description: Ground-truth target-score change at t+1 (for the H1 baseline).
+    - name: delta_target_h2
+      dtype: float32
+      shape: [1]
+    - name: delta_ood_h2
+      dtype: float32
+      shape: [1]
+    - name: delta_retention_h2
+      dtype: float32
+      shape: [1]
+    - name: lhv2
+      dtype: float32
+      shape: [1]
+      description: Pre-declared scalar aggregate of the three H2 deltas, for ranking/reporting only.
+
+# -----------------------------------------------------------------------------
+# DERIVED DIMENSIONS (computed at load time, not hand-edited)
+# -----------------------------------------------------------------------------
+derived:
+  static_candidate_feature_dim: >
+    sum of shapes in candidate_data_stats + gradient_interference_stats
+    + short_probe_dynamics (num_lora_layers resolved after pilot)
+  static_state_feature_dim: >
+    sum of shapes in current_state_performance
+  history_feature_dim: >
+    sum of shapes in recursive_history (excluding current_gen_index, which is
+    typically embedded or normalized separately)
