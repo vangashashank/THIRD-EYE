@@ -49,6 +49,7 @@ class TrainConfig:
     per_model_norm: bool = False
     val_frac: float = 0.2
     semantic_hash: str = ""              # D15; filled from the data by ``fit``
+    protocol: str = "legacy"             # opt-in sprint2_d13; Sprint 1 unchanged
 
     def to_dict(self) -> Dict:
         d = dataclasses.asdict(self)
@@ -130,6 +131,23 @@ def _loss(model, kind, batch, cfg: TrainConfig, rank_coef, state_idx):
 def fit(train: MetaDataset, val: Optional[MetaDataset], cfg: TrainConfig) -> FitResult:
     """Train one model.  With ``val`` -> early stopping on validation loss and
     restore of the best epoch; without it, trains for ``max_epochs``."""
+    d13 = cfg.protocol == "sprint2_d13"
+    if cfg.protocol not in ("legacy", "sprint2_d13"):
+        raise ValueError("Unknown evaluation protocol")
+    if d13:
+        from ..sprint2_evaluation import Sprint2Standardizer, weights, checkpoint_score
+        if (val is None or not train.semantic_hash or cfg.per_model_norm or cfg.rank_weight
+                or tuple(cfg.utility_weights) != DEFAULT_WEIGHTS
+                or train.layout.h1_heads != ("target", "ood", "retention")
+                or cfg.kind == "dynamics" or not np.isfinite(train.y_h2).all()
+                or set(train.group) & set(val.group)
+                or not np.isfinite(train.y_h1).all() or not np.isfinite(val.y_h1).all()
+                or not np.isfinite(val.y_h2).all()):
+            raise ValueError("D13 requires disjoint validation, hashes, complete heads, fixed train-only normalization and no ranking extras")
+        weights(train)
+        weights(val)
+        if cfg.semantic_hash and cfg.semantic_hash != train.semantic_hash:
+            raise ValueError("Configured definition hash differs from training records")
     if cfg.kind != "one_step" and np.isnan(train.y_h2).any():
         raise ValueError("H=2 labels contain NaN")
     if train.semantic_hash:
@@ -138,7 +156,7 @@ def fit(train: MetaDataset, val: Optional[MetaDataset], cfg: TrainConfig) -> Fit
         raise ValueError("train and validation data have different semantic hashes")
     torch.manual_seed(cfg.seed)
     rng = np.random.RandomState(cfg.seed)
-    norm = Standardizer(per_model=cfg.per_model_norm).fit(train)
+    norm = (Sprint2Standardizer() if d13 else Standardizer(per_model=cfg.per_model_norm)).fit(train)
     model = build_model(cfg.kind, train.layout, hidden=cfg.hidden, dropout=cfg.dropout,
                         latent=cfg.latent, update_dim=cfg.update_dim,
                         use_h1_aux=cfg.use_h1_aux, use_history=cfg.use_history)
@@ -154,15 +172,27 @@ def fit(train: MetaDataset, val: Optional[MetaDataset], cfg: TrainConfig) -> Fit
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     result = FitResult(model=model, standardizer=norm, layout=train.layout, config=cfg,
                        n_params=num_parameters(model))
-    best, best_state, bad = float("inf"), None, 0
+    best, best_state, bad = ((float("inf"), float("inf")) if d13 else float("inf")), None, 0
     for epoch in range(cfg.max_epochs):
         model.train()
         total, nb = 0.0, 0
-        for rows in _state_batches(train.state_index, cfg.batch_states, rng):
+        batches = [np.arange(len(train))] if d13 else _state_batches(train.state_index, cfg.batch_states, rng)
+        for rows in batches:
             batch = _tensors(tr, rows)
             sidx = torch.from_numpy(train.state_index[rows])
             opt.zero_grad()
-            loss = _loss(model, cfg.kind, batch, cfg, rank_coef, sidx)
+            if d13:
+                out = model(batch["state"], batch["cand"], batch["hist"], batch["hist_mask"])
+                rw = torch.from_numpy(weights(train).astype(np.float32))
+                def native_loss(head):
+                    losses = torch.nn.functional.huber_loss(out[head], batch["y_" + head],
+                        delta=cfg.huber_delta, reduction="none").mean(1)
+                    return (losses * rw).sum()
+                loss = native_loss("h1") if cfg.kind == "one_step" else native_loss("h2")
+                if cfg.kind != "one_step" and "h1" in out:
+                    loss = loss + cfg.h1_weight*native_loss("h1")
+            else:
+                loss = _loss(model, cfg.kind, batch, cfg, rank_coef, sidx)
             if not torch.isfinite(loss):
                 raise FloatingPointError("non-finite training loss at epoch %d" % epoch)
             loss.backward()
@@ -178,8 +208,12 @@ def fit(train: MetaDataset, val: Optional[MetaDataset], cfg: TrainConfig) -> Fit
                 vloss = float(_loss(model, cfg.kind, vb, cfg, rank_coef,
                                     torch.from_numpy(val.state_index)))
             rec["val_loss"] = vloss
-            if vloss < best - 1e-6:
-                best, bad = vloss, 0
+            criterion = checkpoint_score(val, predict(result, val)) if d13 else vloss
+            if d13:
+                rec["val_lhv_regret"], rec["val_native_mse"] = criterion
+            improved = criterion < best if d13 else criterion < best - 1e-6
+            if improved:
+                best, bad = criterion, 0
                 best_state = copy.deepcopy(model.state_dict())
                 result.best_epoch = epoch
             else:
@@ -200,7 +234,8 @@ def predict(fit_result: FitResult, ds: MetaDataset) -> Predictions:
     if ds.layout.fingerprint() != fit_result.layout.fingerprint():
         raise ValueError("dataset layout differs from the layout the model was trained on")
     want = fit_result.config.semantic_hash
-    if want and ds.semantic_hash and ds.semantic_hash != want:
+    if want and ((fit_result.config.protocol == "sprint2_d13" and ds.semantic_hash != want)
+                 or (ds.semantic_hash and ds.semantic_hash != want)):
         raise ValueError("dataset semantic hash %s differs from the model's %s (definitions changed)"
                          % (ds.semantic_hash, want))
     norm = fit_result.standardizer

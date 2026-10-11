@@ -1,21 +1,24 @@
 # =============================================================================
-# THIRD EYE — FROZEN FEATURE SCHEMA (Mahitha's Sep 30 deliverable)
+# THIRD EYE — PARTIALLY AGREED SPRINT 2 CONTRACT (not frozen)
 # =============================================================================
 # This is the contract between:
 #   - Shashank's training harness (produces these values per candidate update)
 #   - Mahitha's forecaster models (H1 baseline, Third Eye-Direct, Dynamics)
 #
-# Rule: once frozen (after the Sep 30 pilot), do not change field names or
-# shapes without re-syncing with Shashank — every downstream model depends
-# on this exact ordering and dimensionality.
+# Rule: semantic/layout changes require joint review and versioning.
+# This partial revision is not a freeze or permission to alter Sprint 1.
 #
 # "per_candidate" features are computed once per candidate update U_t^k.
 # "per_state" features are computed once per recursive state S_t and shared
 # across all K=3 candidates at that state.
 # =============================================================================
 
-schema_version: "0.1-pilot"
-frozen_on: null   # set to actual date once locked after Sep 30 pilot
+schema_version: "0.2-sprint2"
+frozen_on: null   # Remaining decisions are unresolved; no freeze by this revision.
+# Accepted by current user instruction: D01/D02/D04/D05/D13/D15.
+# Explicit revisions: D03 measured caps, D10 applied H1, D11 shared sibling draw.
+# Other definitions remain pending. Field order/dtypes/shapes are unchanged.
+# Core: T=5 decisions S_0..S_4, ending at applied S_5; K=3, H=2.
 
 # -----------------------------------------------------------------------------
 # 1. CURRENT-STATE PERFORMANCE (per_state)
@@ -97,8 +100,8 @@ gradient_interference_stats:
       description: Cosine similarity between candidate gradient and a small retention-anchor gradient.
     - name: layerwise_grad_norms
       dtype: float32
-      shape: [num_lora_layers]     # fixed once LoRA rank/placement is frozen post-pilot
-      description: Per-layer LoRA gradient norms.
+      shape: [num_lora_layers]     # Explicit count of adapted modules; never inferred from rank.
+      description: One joint A/B gradient norm per adapted module, numeric block order then explicit target placement order.
     - name: sign_agreement
       dtype: float32
       shape: [1]
@@ -109,7 +112,7 @@ gradient_interference_stats:
 # -----------------------------------------------------------------------------
 short_probe_dynamics:
   scope: per_candidate
-  probe_steps: 15        # frozen default; pilot may adjust to 10-20
+  probe_steps: 15        # Still proposed (D12), not execution approval.
   fields:
     - name: train_loss_slope
       dtype: float32
@@ -142,7 +145,7 @@ recursive_history:
     - name: prev_accepted_value
       dtype: float32
       shape: [history_len]
-      description: LHV of the update accepted at each of the last up-to-3 rounds.
+      description: Applied observed H1 utility, 0.50 target + 0.25 OOD + 0.25 retention H1 accuracy deltas; never an H2 label or forecast.
     - name: current_gen_index
       dtype: int32
       shape: [1]
@@ -150,16 +153,19 @@ recursive_history:
     - name: prev_target_change
       dtype: float32
       shape: [history_len]
+      description: Observed applied t+1 target accuracy minus that update's parent accuracy; last min(t,3) rounds, oldest first, left zero padding.
     - name: prev_ood_change
       dtype: float32
       shape: [history_len]
+      description: Observed applied t+1 OOD accuracy minus that update's parent accuracy.
     - name: prev_retention_change
       dtype: float32
       shape: [history_len]
+      description: Observed applied t+1 retention accuracy minus that update's parent accuracy.
     - name: history_mask
       dtype: float32
       shape: [history_len]
-      description: 1.0 where a real history entry exists, 0.0 for padding.
+      description: 1.0 for each required observed applied H1 row, 0.0 only for absent pre-trajectory padding; missing applied results must fail, not pad.
 
 # -----------------------------------------------------------------------------
 # LABELS (meta-labels, per_candidate) — produced only during expensive labeling
@@ -171,20 +177,23 @@ labels:
     - name: delta_target_h1
       dtype: float32
       shape: [1]
-      description: Ground-truth target-score change at t+1 (for the H1 baseline).
+      description: Target t+1 accuracy minus current parent accuracy, fractions and positive for improvement; label only.
     - name: delta_target_h2
       dtype: float32
       shape: [1]
+      description: Target t+2 accuracy minus current parent accuracy under one standardized sibling continuation draw.
     - name: delta_ood_h2
       dtype: float32
       shape: [1]
+      description: OOD t+2 accuracy minus current parent accuracy, fractions.
     - name: delta_retention_h2
       dtype: float32
       shape: [1]
+      description: Retention t+2 accuracy minus current parent accuracy, fractions.
     - name: lhv2
       dtype: float32
       shape: [1]
-      description: Pre-declared scalar aggregate of the three H2 deltas, for ranking/reporting only.
+      description: 0.50 delta_target_h2 + 0.25 delta_ood_h2 + 0.25 delta_retention_h2; label/ranking only, strictly H2.
 
 # -----------------------------------------------------------------------------
 # DERIVED DIMENSIONS (computed at load time, not hand-edited)
@@ -192,7 +201,7 @@ labels:
 derived:
   static_candidate_feature_dim: >
     sum of shapes in candidate_data_stats + gradient_interference_stats
-    + short_probe_dynamics (num_lora_layers resolved after pilot)
+    + short_probe_dynamics (num_lora_layers explicitly bound by actual module manifest)
   static_state_feature_dim: >
     sum of shapes in current_state_performance
   history_feature_dim: >

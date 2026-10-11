@@ -56,7 +56,7 @@ def utility(delta, weights: Sequence[float] = DEFAULT_WEIGHTS) -> np.ndarray:
     w = np.asarray(weights, dtype=np.float64)
     if d.shape[-1] != 3 or w.shape != (3,) or np.any(w < 0) or w.sum() <= 0:
         raise ValueError("need (..., 3) deltas and 3 non-negative weights")
-    return d @ (w / w.sum())
+    return np.sum(d * (w / w.sum()), axis=-1)
 
 
 def utility_h1(delta_h1, heads: Sequence[str], weights: Sequence[float] = DEFAULT_WEIGHTS):
@@ -64,7 +64,7 @@ def utility_h1(delta_h1, heads: Sequence[str], weights: Sequence[float] = DEFAUL
     d = np.asarray(delta_h1, dtype=np.float64)
     idx = [H2_HEADS.index(h) for h in heads]
     w = np.asarray(weights, dtype=np.float64)[idx]
-    return d @ (w / w.sum())
+    return np.sum(d * (w / w.sum()), axis=-1)
 
 
 def expected_history_count(state_id: int, history_len: int, rule: str = "applied_h1") -> int:
@@ -457,6 +457,10 @@ def fixed_split(ds: MetaDataset, assignment: Dict[str, str]) -> Dict[str, np.nda
     """Row indices per split from a fixed lineage-group -> split-name manifest
     (D02, e.g. 8 train / 2 validation / 2 test groups).  Every group in the data
     must be assigned and no assigned group may be absent."""
+    if (not isinstance(assignment, dict) or not assignment
+            or any(not isinstance(g, str) or not g for g in assignment)
+            or any(v not in ("train", "val", "test") for v in assignment.values())):
+        raise ValueError("manifest must be a nonempty {group_id: train|val|test} mapping")
     groups = set(np.unique(ds.group).tolist())
     if groups != set(assignment):
         raise ValueError("assignment must cover exactly the data's groups; diff=%s"
@@ -571,8 +575,12 @@ class Standardizer:
     def from_dict(d: Dict) -> "Standardizer":
         def conv(v):
             if isinstance(v, list) and len(v) == 2 and isinstance(v[0], list):
-                return (np.asarray(v[0], np.float32), np.asarray(v[1], np.float32))
+                dtype = np.float64 if d.get("protocol") == "sprint2_d13" else np.float32
+                return (np.asarray(v[0], dtype), np.asarray(v[1], dtype))
             if isinstance(v, dict):
                 return {k: conv(x) for k, x in v.items()}
             return v
+        if d.get("protocol") == "sprint2_d13":
+            from ..sprint2_evaluation import Sprint2Standardizer
+            return Sprint2Standardizer(per_model=False, stats=conv(d["stats"]))
         return Standardizer(per_model=bool(d["per_model"]), stats=conv(d["stats"]))

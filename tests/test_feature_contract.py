@@ -16,12 +16,17 @@ import numpy as np
 import yaml
 
 from src.third_eye.feature_contract import (
+    AppliedTransition,
     ContractError,
     HistoryContext,
     HistoryEntry,
     ObservationAvailability,
+    TrajectoryIdentity,
     UnresolvedContractError,
     load_feature_contract,
+    build_applied_history,
+    accuracy_deltas,
+    weighted_utility,
 )
 
 
@@ -33,7 +38,20 @@ HISTORY_FIELDS = (
 )
 
 
-def synthetic_inputs(contract, *, ranking_state=0, rounds=(), padding_side="right", order="oldest_first"):
+SYNTHETIC_IDENTITY = TrajectoryIdentity("synthetic-v1", "synthetic-group", "synthetic-trajectory",
+                                       "0" * 64, "a" * 64)
+
+
+def synthetic_ledger(count):
+    return tuple(AppliedTransition(
+        SYNTHETIC_IDENTITY, f"synthetic-transition-{state}", state, state + 1, 0,
+        f"{state:064x}", f"{state+1:064x}",
+        dict(target=0.5, ood=0.5, retention=0.5), dict(target=0.5, ood=0.5, retention=0.5),
+        state + 1, state + 1,
+    ) for state in range(count))
+
+
+def synthetic_inputs(contract, *, ranking_state=0, rounds=None, padding_side="left", order="oldest_first"):
     values = {
         group.name: {
             field.name: np.zeros(contract.resolved_shape(field), dtype=field.dtype)
@@ -41,20 +59,20 @@ def synthetic_inputs(contract, *, ranking_state=0, rounds=(), padding_side="righ
         }
         for group in contract.input_groups
     }
-    history = values["recursive_history"]
-    history["current_gen_index"][0] = ranking_state
-    entries = [None] * contract.history_len
-    start = contract.history_len - len(rounds) if padding_side == "left" else 0
-    for slot, update_round in enumerate(rounds, start=start):
-        history["history_mask"][slot] = 1
-        entries[slot] = HistoryEntry(update_round, {
-            name: ObservationAvailability(
-                "forecast" if name == "prev_accepted_value" else "applied_h1",
-                update_round if name == "prev_accepted_value" else update_round + 1,
-            )
-            for name in HISTORY_FIELDS
-        })
-    return values, HistoryContext(ranking_state, padding_side, order, tuple(entries))
+    history, context = build_applied_history(synthetic_ledger(ranking_state), identity=SYNTHETIC_IDENTITY,
+        ranking_state=ranking_state, ranking_parent_sha256=f"{ranking_state:064x}", cutoff=ranking_state)
+    if rounds is not None:
+        history["history_mask"][:] = 0
+        entries = [None] * 3
+        start = 3-len(rounds) if padding_side == "left" else 0
+        for slot, update_round in enumerate(rounds, start=start):
+            history["history_mask"][slot] = 1
+            entries[slot] = HistoryEntry(update_round, {
+                name: ObservationAvailability("applied_h1", update_round + 1) for name in HISTORY_FIELDS
+            }, f"synthetic-transition-{update_round}")
+        context = replace(context, entries=tuple(entries))
+    values["recursive_history"] = history
+    return values, replace(context, padding_side=padding_side, order=order)
 
 
 class FeatureContractTests(unittest.TestCase):
@@ -87,9 +105,8 @@ class FeatureContractTests(unittest.TestCase):
             path.write_text(text)
             return load_feature_contract(path)
 
-    def test_source_copy_and_declared_order(self):
-        self.assertEqual(self.contract.source_sha256,
-                         "5092f748af6f854bf52a19b57d943259dbc844555c97e0236128373520602c68")
+    def test_revised_schema_and_declared_order(self):
+        self.assertEqual(self.contract.schema_version, "0.2-sprint2")
         self.assertEqual(self.contract.source_sha256, hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest())
         original = yaml.safe_load(SCHEMA_PATH.read_text())
         expected = [
@@ -114,8 +131,9 @@ class FeatureContractTests(unittest.TestCase):
         self.assertIsNone(contract.dimension_summary()["static_candidate_feature_dim"])
         self.assertIsNone(contract.dimension_summary()["history_feature_dim"])
         issues = " ".join(contract.unresolved_definitions())
-        for term in ("num_lora_layers", "history_len", "layer_order", "confidence", "duplicate", "lhv2", "direction"):
+        for term in ("num_lora_layers", "history_len", "layer_order", "confidence", "duplicate", "calibration"):
             self.assertIn(term, issues)
+        self.assertNotIn("lhv2 aggregate formula are unresolved", issues)
         with self.assertRaisesRegex(UnresolvedContractError, "layer_order"):
             self.validate(contract=contract)
 
@@ -142,6 +160,14 @@ class FeatureContractTests(unittest.TestCase):
                            {"num_lora_layers": "2"}, {"history_len": 2}, {"inferred": 2}):
             with self.subTest(dimensions=dimensions), self.assertRaises(ContractError):
                 load_feature_contract(SCHEMA_PATH, dimensions=dimensions)
+
+    def test_revised_contract_keeps_history_len_three_and_accuracy_fractions(self):
+        with self.assertRaisesRegex(ContractError, "D10"):
+            self.schema_variant(lambda data: data["recursive_history"].update(history_len=4))
+        for value in (-.1, 1.1):
+            self.values["current_state_performance"]["target_val_accuracy"][0] = value
+            with self.assertRaisesRegex(ContractError, "fraction"):
+                self.validate()
 
     def test_invalid_layer_manifest(self):
         for order in ((), ("a",), ("a", "a"), ("a", ""), ("a", 2), "ab"):
@@ -225,7 +251,7 @@ class FeatureContractTests(unittest.TestCase):
         before = copy.deepcopy(self.values)
         result = self.validate()
         self.assertTrue(result.structural_only)
-        self.assertIn("lhv2", " ".join(result.unresolved_definitions))
+        self.assertIn("confidence", " ".join(result.unresolved_definitions))
         for group, fields in before.items():
             for name, value in fields.items():
                 np.testing.assert_array_equal(value, self.values[group][name])
@@ -314,22 +340,21 @@ class FeatureContractTests(unittest.TestCase):
     def test_empty_and_real_zero_histories_are_distinct_and_valid(self):
         self.assertTrue(self.validate().structural_only)
         values, context = synthetic_inputs(self.contract, ranking_state=1, rounds=(0,))
-        self.assertEqual(values["recursive_history"]["history_mask"].tolist(), [1, 0, 0])
+        self.assertEqual(values["recursive_history"]["history_mask"].tolist(), [0, 0, 1])
         for name in HISTORY_FIELDS:
             self.assertFalse(values["recursive_history"][name].any())
         self.assertTrue(self.validate(values, context).structural_only)
 
-    def test_explicit_left_right_padding_and_oldest_newest_order(self):
-        for count in range(4):
-            for padding_side in ("left", "right"):
-                for order in ("oldest_first", "newest_first"):
-                    rounds = tuple(range(count))
-                    if order == "newest_first":
-                        rounds = tuple(reversed(rounds))
-                    values, context = synthetic_inputs(self.contract, ranking_state=count, rounds=rounds,
-                                                       padding_side=padding_side, order=order)
-                    with self.subTest(count=count, side=padding_side, order=order):
-                        self.assertTrue(self.validate(values, context).structural_only)
+    def test_h1_lengths_at_all_five_decisions(self):
+        for state, expected in enumerate((0, 1, 2, 3, 3)):
+            values, context = synthetic_inputs(self.contract, ranking_state=state)
+            self.assertEqual(int(values["recursive_history"]["history_mask"].sum()), expected)
+            self.assertEqual([entry.update_round for entry in context.entries if entry is not None],
+                             list(range(max(0, state-3), state)))
+            self.assertTrue(self.validate(values, context).structural_only)
+        for policy in (dict(padding_side="right"), dict(order="newest_first")):
+            with self.assertRaises(ContractError):
+                self.validate(context=replace(self.context, **policy))
 
     def test_mask_must_be_binary_contiguous_and_aligned(self):
         for mask in ([0.5, 0, 0], [-1, 0, 0], [2, 0, 0], [0, 1, 0]):
@@ -338,7 +363,7 @@ class FeatureContractTests(unittest.TestCase):
                 self.validate()
         values, context = synthetic_inputs(self.contract, ranking_state=1, rounds=(0,))
         with self.assertRaisesRegex(ContractError, "padding_side"):
-            self.validate(values, replace(context, padding_side="left"))
+            self.validate(values, replace(context, padding_side="right"))
 
     def test_padding_values_and_metadata_must_be_empty(self):
         for name in HISTORY_FIELDS:
@@ -354,10 +379,11 @@ class FeatureContractTests(unittest.TestCase):
         values, context = synthetic_inputs(self.contract, ranking_state=1, rounds=(0,))
         with self.assertRaisesRegex(ContractError, "provenance"):
             self.validate(values, replace(context, entries=(None, None, None)))
-        observations = dict(context.entries[0].observations)
+        entry = context.entries[-1]
+        observations = dict(entry.observations)
         observations.pop("prev_accepted_value")
         with self.assertRaisesRegex(ContractError, "missing fields"):
-            self.validate(values, replace(context, entries=(HistoryEntry(0, observations), None, None)))
+            self.validate(values, replace(context, entries=(None, None, replace(entry, observations=observations))))
 
     def test_history_context_cutoff_and_policies_are_required(self):
         with self.assertRaisesRegex(ContractError, "history_context"):
@@ -392,34 +418,111 @@ class FeatureContractTests(unittest.TestCase):
     def test_realized_h2_rejected_before_endpoint_even_if_file_claims_available(self):
         values, context = synthetic_inputs(self.contract, ranking_state=1, rounds=(0,))
         for available_at in (1, 2):
-            with self.subTest(available_at=available_at), self.assertRaisesRegex(ContractError, "unavailable"):
+            with self.subTest(available_at=available_at), self.assertRaisesRegex(ContractError, "unsupported history source"):
                 self.change_observation(values, context, "prev_accepted_value", "applied_h2", available_at)
 
-    def test_observed_h2_is_allowed_only_after_endpoint_and_observation(self):
-        values, context = synthetic_inputs(self.contract, ranking_state=2, rounds=(0,))
-        self.assertTrue(self.change_observation(values, context, "prev_accepted_value", "applied_h2", 2).structural_only)
-        with self.assertRaisesRegex(ContractError, "unavailable"):
-            self.change_observation(values, context, "prev_accepted_value", "applied_h2", 3)
+    def test_applied_h1_accepted_value_and_h2_always_excluded(self):
+        values, context = synthetic_inputs(self.contract, ranking_state=2)
+        self.assertTrue(self.change_observation(values, context, "prev_accepted_value", "applied_h1", 1).structural_only)
+        with self.assertRaisesRegex(ContractError, "unsupported history source"):
+            self.change_observation(values, context, "prev_accepted_value", "applied_h2", 2)
         with self.assertRaisesRegex(ContractError, "unavailable"):
             self.change_observation(values, context, "prev_target_change", "applied_h1", 3)
 
     def test_simulated_h2_and_future_forecast_are_not_accepted_history(self):
-        values, context = synthetic_inputs(self.contract, ranking_state=2, rounds=(0,))
+        values, context = synthetic_inputs(self.contract, ranking_state=2)
         with self.assertRaisesRegex(ContractError, "unsupported history source"):
             self.change_observation(values, context, "prev_accepted_value", "simulated_h2", 2)
-        with self.assertRaisesRegex(ContractError, "unavailable"):
+        with self.assertRaisesRegex(ContractError, "unsupported history source"):
             self.change_observation(values, context, "prev_accepted_value", "forecast", 3)
         with self.assertRaisesRegex(ContractError, "unsupported history source"):
             self.change_observation(values, context, "prev_target_change", "forecast", 0)
 
     def test_observation_metadata_is_strict(self):
-        values, context = synthetic_inputs(self.contract, ranking_state=2, rounds=(0,))
+        values, context = synthetic_inputs(self.contract, ranking_state=2)
         for source in (None, 1, ["forecast"], np.array(["forecast", "applied_h2"])):
             with self.subTest(source=source), self.assertRaisesRegex(ContractError, "source must be a string"):
                 self.change_observation(values, context, "prev_accepted_value", source, 0)
         for available_at in (True, -1, 0.5, "0"):
             with self.subTest(available_at=available_at), self.assertRaises(ContractError):
                 self.change_observation(values, context, "prev_accepted_value", "forecast", available_at)
+
+    def test_missing_applied_observations_never_become_padding(self):
+        values, context = synthetic_inputs(self.contract, ranking_state=4)
+        with self.assertRaisesRegex(ContractError, "Missing expected"):
+            self.validate(values, replace(context, ledger=context.ledger[:-1]))
+        values["recursive_history"]["history_mask"][0] = 0
+        with self.assertRaisesRegex(ContractError, "missing expected"):
+            self.validate(values, context)
+
+    def test_last_three_applied_rows_keep_oldest_first_values(self):
+        parent = dict(target=.5, ood=.5, retention=.5)
+        rows = []
+        for state, row in enumerate(synthetic_ledger(4)):
+            endpoint = {name: value + (state+1)*.01 for name, value in parent.items()}
+            rows.append(replace(row, parent_accuracy=parent, endpoint_accuracy=endpoint))
+            parent = endpoint
+        history, context = build_applied_history(rows, identity=SYNTHETIC_IDENTITY,
+            ranking_state=4, ranking_parent_sha256=rows[-1].endpoint_sha256, cutoff=4)
+        self.values["recursive_history"] = history
+        self.assertEqual([row.update_round for row in context.entries], [1, 2, 3])
+        for name in HISTORY_FIELDS:
+            np.testing.assert_allclose(history[name], [.02, .03, .04], atol=1e-7)
+        self.validate(context=context)
+        history["prev_target_change"] = history["prev_target_change"][::-1].copy()
+        with self.assertRaisesRegex(ContractError, "H1 accuracy evidence"):
+            self.validate(context=context)
+
+    def test_applied_identity_parent_chain_cutoff_and_branch_checks(self):
+        values, context = synthetic_inputs(self.contract, ranking_state=2)
+        bad_rows = (
+            replace(context.ledger[0], identity=replace(SYNTHETIC_IDENTITY, group_id="other")),
+            replace(context.ledger[0], parent_sha256="f"*64),
+            replace(context.ledger[0], observed_at=3),
+            replace(context.ledger[0], available_at_state=3),
+            replace(context.ledger[0], record_type="simulated_h2"),
+            replace(context.ledger[0], successful=False),
+            replace(context.ledger[0], parent_accuracy=dict(target=float("nan"), ood=.5, retention=.5)),
+        )
+        for row in bad_rows:
+            with self.subTest(row=row), self.assertRaises(ContractError):
+                self.validate(values, replace(context, ledger=(row, context.ledger[1])))
+        with self.assertRaisesRegex(ContractError, "Ranking parent"):
+            self.validate(values, replace(context, ranking_parent_sha256="f"*64))
+        with self.assertRaisesRegex(ContractError, "cutoff"):
+            self.validate(values, replace(context, cutoff=1))
+
+    def test_h1_deltas_and_utility_are_verified_and_h2_labels_remain_separate(self):
+        parent = dict(target=.60, ood=.50, retention=.80)
+        endpoint = dict(target=.64, ood=.48, retention=.79)
+        row = replace(synthetic_ledger(1)[0], parent_accuracy=parent, endpoint_accuracy=endpoint)
+        history, context = build_applied_history((row,), identity=SYNTHETIC_IDENTITY,
+            ranking_state=1, ranking_parent_sha256=row.endpoint_sha256, cutoff=1)
+        self.values["recursive_history"] = history
+        self.assertAlmostEqual(float(history["prev_accepted_value"][-1]), .0125)
+        self.assertTrue(self.validate(context=context).structural_only)
+        history["prev_accepted_value"][-1] = .04
+        with self.assertRaisesRegex(ContractError, "H1 accuracy evidence"):
+            self.validate(context=context)
+        labels = {"labels": {field.name: np.zeros(1, np.float32) for field in self.contract.label_group.fields}}
+        labels["labels"]["delta_target_h1"][0] = .5
+        labels["labels"]["delta_target_h2"][0] = .1
+        labels["labels"]["lhv2"][0] = weighted_utility([np.float32(.1), 0, 0])
+        self.contract.validate_labels(labels)
+        labels["labels"]["lhv2"][0] = .25
+        with self.assertRaisesRegex(ContractError, "H2"):
+            self.contract.validate_labels(labels)
+
+    def test_accuracy_units_and_endpoint_direction(self):
+        parent = dict(target=.6, ood=.5, retention=.8)
+        endpoint = dict(target=.64, ood=.48, retention=.79)
+        np.testing.assert_allclose(accuracy_deltas(parent, endpoint), [.04, -.02, -.01], atol=1e-7)
+        np.testing.assert_allclose(accuracy_deltas(endpoint, parent), [-.04, .02, .01], atol=1e-7)
+        for bad in (True, 1.1, -0.1, float("inf")):
+            with self.assertRaises(ContractError):
+                accuracy_deltas(parent, dict(target=bad, ood=.5, retention=.5))
+        with self.assertRaisesRegex(ContractError, "Nonfinite utility"):
+            weighted_utility([1e308]*3)
 
 
 if __name__ == "__main__":

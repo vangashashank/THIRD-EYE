@@ -1,4 +1,4 @@
-"""Isolated validation of the proposed pilot contract, not feature extraction.
+"""Isolated validation of the partially agreed Sprint 2 contract.
 
 No training modules are imported. Structural validation never certifies research
 measurements or agreement on the contract's unresolved semantic definitions.
@@ -9,12 +9,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from math import prod
+from numbers import Real
 from pathlib import Path
 from types import MappingProxyType
 from typing import Optional, Tuple, Union
 
 import numpy as np
 import yaml
+
+SEMANTIC_VERSION = "0.2-sprint2"
+CORE_DECISIONS = 5
+METRICS = ("target", "ood", "retention")
+UTILITY_WEIGHTS = np.array([0.50, 0.25, 0.25], dtype=np.float64)
+UTILITY_WEIGHTS.setflags(write=False)
 
 
 _INPUT_FIELDS = {
@@ -48,15 +55,15 @@ _DERIVED_KEYS = (
     "static_candidate_feature_dim", "static_state_feature_dim", "history_feature_dim",
 )
 _SEMANTIC_DECISIONS = (
-    "Contract approval is unverified; frozen_on metadata is not approval.",
-    "num_lora_layers counting unit and canonical layer/module/A-B order need agreement.",
-    "Accuracy scoring, populations, units and the 256-example anchor need agreement.",
+    "Only D01/D02/D04/D05/D13/D15 and explicit D03/D10/D11 revisions are accepted; schema is not frozen.",
+    "Task scorers, dataset identities and the 256-example anchor remain unresolved (D03).",
+    "Generation caps need training-only measured calibration and review before collection (D03).",
+    "Actual model placement/count/ordered manifest must still be supplied explicitly (D05).",
     "Generation/corrected-answer confidence formulas and std convention are unresolved.",
     "Near-duplicate detection, threshold and duplicate-rate denominator are unresolved.",
     "Token lengths, NLL reduction, verifier attempts, difficulty and embeddings need definitions.",
-    "Score-change direction, units, endpoints and the lhv2 aggregate formula are unresolved.",
-    "History padding/order, generation-to-applied-round mapping and LHV source need agreement.",
     "Probe budget/optimizer policy, gradients, slopes, KL and adapter delta need definitions.",
+    "Compute/storage and branch-retention approval remain unresolved (D14).",
 )
 
 
@@ -66,6 +73,27 @@ class ContractError(ValueError):
 
 class UnresolvedContractError(ContractError):
     """Structural validation needs an explicit dimension or layer manifest."""
+
+
+def accuracy_deltas(parent, endpoint):
+    for values in (parent, endpoint):
+        _mapping_keys(values, METRICS, where="accuracy metrics")
+        for value in values.values():
+            if (isinstance(value, (bool, np.bool_)) or not isinstance(value, Real)
+                    or not np.isfinite(value) or not 0 <= value <= 1):
+                raise ContractError("Accuracies must be finite fractions in [0, 1]")
+    return np.array([endpoint[key] - parent[key] for key in METRICS], dtype=np.float32)
+
+
+def weighted_utility(deltas):
+    values = np.asarray(deltas)
+    if values.shape != (3,) or values.dtype.kind not in "fiu" or not np.isfinite(values).all():
+        raise ContractError("Utility requires three finite target/OOD/retention deltas")
+    with np.errstate(over="ignore", invalid="ignore"):
+        result = np.float32(values.astype(np.float64) @ UTILITY_WEIGHTS)
+    if not np.isfinite(result):
+        raise ContractError("Nonfinite utility after float32 conversion")
+    return result
 
 
 class _UniqueSafeLoader(yaml.SafeLoader):
@@ -139,7 +167,7 @@ class GroupSpec:
 class ObservationAvailability:
     """Caller-asserted logical availability, not evidence verified by this module.
 
-    Sources: forecast (accepted value only), applied_h1, or applied_h2.
+    Source must be applied_h1 for every history value, including accepted utility.
     available_at_state is the first recursive state where the value was observed.
     Offline simulated_h2 labels are intentionally not an accepted source.
     """
@@ -151,6 +179,33 @@ class ObservationAvailability:
 class HistoryEntry:
     update_round: int
     observations: Mapping
+    transition_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class TrajectoryIdentity:
+    corpus_version: str
+    group_id: str
+    trajectory_id: str
+    root_sha256: str
+    evaluation_sha256: str
+
+
+@dataclass(frozen=True)
+class AppliedTransition:
+    identity: TrajectoryIdentity
+    transition_id: str
+    from_state: int
+    to_state: int
+    candidate_id: int
+    parent_sha256: str
+    endpoint_sha256: str
+    parent_accuracy: Mapping
+    endpoint_accuracy: Mapping
+    available_at_state: int
+    observed_at: int
+    record_type: str = "applied_h1"
+    successful: bool = True
 
 
 @dataclass(frozen=True)
@@ -159,12 +214,96 @@ class HistoryContext:
 
     entries are aligned with mask slots; padding uses None. update_round r is an
     applied update from state r to r+1 under this supplied indexing convention.
-    The validator checks ordering/availability, not completeness of the run ledger.
+    ledger is a complete as-of applied lineage, not a simulated branch label file.
+    observed_at/cutoff are integer logical observation ticks, separate from state.
+    Checks verify consistency of supplied evidence, not independently its truth.
     """
     ranking_state: int
     padding_side: str
     order: str
     entries: Tuple[Optional[HistoryEntry], ...]
+    identity: Optional[TrajectoryIdentity] = None
+    ranking_parent_sha256: Optional[str] = None
+    cutoff: Optional[int] = None
+    ledger: Tuple[AppliedTransition, ...] = ()
+
+
+def _sha(value):
+    if (not isinstance(value, str) or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)):
+        raise ContractError("Expected a lowercase SHA-256 identity")
+
+
+def _applied_window(context, history_len):
+    if not isinstance(context.identity, TrajectoryIdentity):
+        raise ContractError("Explicit trajectory identity is required")
+    identity = context.identity
+    for name in ("corpus_version", "group_id", "trajectory_id"):
+        if not isinstance(getattr(identity, name), str) or not getattr(identity, name).strip():
+            raise ContractError("Trajectory identity strings must be nonempty")
+    _sha(identity.root_sha256)
+    _sha(identity.evaluation_sha256)
+    _sha(context.ranking_parent_sha256)
+    _integer(context.cutoff, where="observation cutoff")
+    _integer(context.ranking_state, where="ranking_state")
+    if context.ranking_state > CORE_DECISIONS:
+        raise ContractError("ranking_state exceeds T=5")
+    if not isinstance(context.ledger, (tuple, list)) or len(context.ledger) != context.ranking_state:
+        raise ContractError("Missing expected applied observations; ledger must cover states 0..t-1")
+    parent = identity.root_sha256
+    previous = None
+    seen = set()
+    for state, transition in enumerate(context.ledger):
+        if not isinstance(transition, AppliedTransition) or transition.identity != identity:
+            raise ContractError("Applied-transition provenance/identity mismatch")
+        if (transition.record_type != "applied_h1" or transition.successful is not True
+                or type(transition.from_state) is not int or type(transition.to_state) is not int
+                or transition.from_state != state or transition.to_state != state + 1):
+            raise ContractError("Expected a successful applied_h1 transition, not a simulated branch")
+        if (not isinstance(transition.transition_id, str) or not transition.transition_id.strip()
+                or transition.transition_id in seen):
+            raise ContractError("Missing or duplicate applied transition ID")
+        seen.add(transition.transition_id)
+        _integer(transition.candidate_id, where="selected candidate")
+        if transition.candidate_id >= 3:
+            raise ContractError("Expected one of K=3 applied candidates")
+        _sha(transition.parent_sha256)
+        _sha(transition.endpoint_sha256)
+        if transition.parent_sha256 != parent:
+            raise ContractError("Applied parent/endpoint chain mismatch")
+        accuracy_deltas(transition.parent_accuracy, transition.endpoint_accuracy)
+        if previous is not None and transition.parent_accuracy != previous:
+            raise ContractError("Applied accuracy endpoints do not form one lineage")
+        _integer(transition.available_at_state, where="available_at_state")
+        _integer(transition.observed_at, where="observed_at")
+        if (not state + 1 <= transition.available_at_state <= context.ranking_state
+                or transition.observed_at > context.cutoff):
+            raise ContractError("Applied observation unavailable at ranking cutoff")
+        parent, previous = transition.endpoint_sha256, transition.endpoint_accuracy
+    if parent != context.ranking_parent_sha256:
+        raise ContractError("Ranking parent does not match the applied lineage")
+    return context.ledger[-history_len:]
+
+
+def build_applied_history(ledger, *, identity, ranking_state, ranking_parent_sha256, cutoff):
+    """Pure D10 collator. Never invent/pad missing successfully applied results."""
+    context = HistoryContext(ranking_state, "left", "oldest_first", (), identity,
+                             ranking_parent_sha256, cutoff, tuple(ledger))
+    window = _applied_window(context, 3)
+    values = {name: np.zeros(3, np.float32) for name in (*_HISTORY_VALUES, "history_mask")}
+    values["current_gen_index"] = np.array([ranking_state], np.int32)
+    entries = [None] * 3
+    for slot, transition in enumerate(window, start=3-len(window)):
+        deltas = accuracy_deltas(transition.parent_accuracy, transition.endpoint_accuracy)
+        for name, value in zip(_HISTORY_VALUES, (weighted_utility(deltas), *deltas)):
+            values[name][slot] = value
+        values["history_mask"][slot] = 1
+        entries[slot] = HistoryEntry(transition.from_state, {
+            name: ObservationAvailability("applied_h1", transition.available_at_state)
+            for name in _HISTORY_VALUES
+        }, transition.transition_id)
+    return values, HistoryContext(ranking_state, "left", "oldest_first", tuple(entries),
+                                 identity, ranking_parent_sha256, cutoff, tuple(ledger))
 
 
 @dataclass(frozen=True)
@@ -268,23 +407,33 @@ class FeatureContract:
         if _layer_order(layer_order) != self.layer_order:
             raise ContractError("Payload layer_order does not match the configured layer manifest")
         self._validate_groups(values, self.input_groups, where="inputs")
+        for name in ("target_val_accuracy", "ood_proxy_accuracy", "retention_anchor_accuracy"):
+            if np.any((values["current_state_performance"][name] < 0)
+                      | (values["current_state_performance"][name] > 1)):
+                raise ContractError(f"{name}: accuracy must be a fraction in [0, 1]")
         self._validate_history(values["recursive_history"], history_context)
         return ValidationResult(self.unresolved_definitions())
 
     def validate_labels(self, values):
         """Validate the separate offline label payload; never expose it as inputs."""
         self._validate_groups(values, (self.label_group,), where="labels payload")
+        labels = values["labels"]
+        if any(np.any(np.abs(value) > 1) for value in labels.values()):
+            raise ContractError("Accuracy delta labels must be in [-1, 1]")
+        expected = weighted_utility([labels[f"delta_{name}_h2"][0] for name in METRICS])
+        if labels["lhv2"][0] != expected:
+            raise ContractError("lhv2 must equal the agreed weighted H2 deltas, never H1")
         return ValidationResult(self.unresolved_definitions())
 
     def _validate_history(self, history, context):
         if not isinstance(context, HistoryContext):
             raise ContractError("history_context: explicit policy and availability metadata are required")
         _integer(context.ranking_state, where="ranking_state")
+        window = _applied_window(context, self.history_len)
         if int(history["current_gen_index"][0]) != context.ranking_state:
             raise ContractError("current_gen_index must equal the as-of ranking_state")
         if (not isinstance(context.padding_side, str) or not isinstance(context.order, str)
-                or context.padding_side not in ("left", "right")
-                or context.order not in ("oldest_first", "newest_first")):
+                or context.padding_side != "left" or context.order != "oldest_first"):
             raise ContractError("history_context: supply padding_side and history order explicitly")
         if not isinstance(context.entries, (tuple, list)) or len(context.entries) != self.history_len:
             raise ContractError("history_context: entries must align with all history slots")
@@ -292,18 +441,18 @@ class FeatureContract:
         if not np.isin(mask, (0.0, 1.0)).all():
             raise ContractError("history_mask must contain only 0.0 or 1.0")
         real = int(mask.sum())
+        if real != len(window):
+            raise ContractError("history_mask cannot pad missing expected applied observations")
         expected = np.zeros(self.history_len, dtype=np.float32)
         if real:
-            if context.padding_side == "left":
-                expected[-real:] = 1
-            else:
-                expected[:real] = 1
+            expected[-real:] = 1
         if not np.array_equal(mask, expected):
             raise ContractError("history_mask must be contiguous and match the explicit padding_side")
         for name in _HISTORY_VALUES:
             if np.any(history[name][mask == 0] != 0):
                 raise ContractError(f"{name}: padded values must be zero")
         rounds = []
+        expected_rounds = [row.from_state for row in window]
         for index, entry in enumerate(context.entries):
             if mask[index] == 0:
                 if entry is not None:
@@ -315,6 +464,9 @@ class FeatureContract:
             if entry.update_round >= context.ranking_state:
                 raise ContractError("History update must be applied before the ranking state")
             rounds.append(entry.update_round)
+            transition = window[len(rounds)-1]
+            if entry.update_round != transition.from_state or entry.transition_id != transition.transition_id:
+                raise ContractError("History window/provenance must match the last applied transitions")
             _mapping_keys(entry.observations, _HISTORY_VALUES, where="history observations")
             for name, observation in entry.observations.items():
                 if not isinstance(observation, ObservationAvailability):
@@ -322,19 +474,20 @@ class FeatureContract:
                 if not isinstance(observation.source, str):
                     raise ContractError(f"{name}: history source must be a string")
                 _integer(observation.available_at_state, where=f"{name}.available_at_state")
-                if observation.source == "forecast" and name == "prev_accepted_value":
-                    earliest = entry.update_round
-                elif observation.source == "applied_h1" and name != "prev_accepted_value":
-                    earliest = entry.update_round + 1
-                elif observation.source == "applied_h2":
-                    earliest = entry.update_round + 2
-                else:
+                if observation.source != "applied_h1":
                     raise ContractError(f"{name}: unsupported history source {observation.source!r}")
+                earliest = entry.update_round + 1
                 if not earliest <= observation.available_at_state <= context.ranking_state:
                     raise ContractError(f"{name}: outcome unavailable at ranking or before its endpoint")
+                if observation.available_at_state != transition.available_at_state:
+                    raise ContractError("History observation availability does not match applied provenance")
+            deltas = accuracy_deltas(transition.parent_accuracy, transition.endpoint_accuracy)
+            for name, expected_value in zip(_HISTORY_VALUES, (weighted_utility(deltas), *deltas)):
+                if history[name][index] != expected_value:
+                    raise ContractError(f"{name}: value does not match applied H1 accuracy evidence")
         if len(set(rounds)) != len(rounds):
             raise ContractError("History contains duplicate update rounds")
-        if rounds != sorted(rounds, reverse=context.order == "newest_first"):
+        if rounds != expected_rounds:
             raise ContractError("History entries do not match the explicit history order")
 
 
@@ -352,8 +505,8 @@ def load_feature_contract(path, *, dimensions=None, layer_order=None):
         raise ContractError(f"Invalid safe YAML schema: {error}") from error
     required = ("schema_version", "frozen_on", *_INPUT_FIELDS, "labels", "derived")
     _mapping_keys(document, required, where="schema")
-    if document["schema_version"] != "0.1-pilot":
-        raise ContractError("Unsupported schema_version; expected 0.1-pilot")
+    if document["schema_version"] != SEMANTIC_VERSION:
+        raise ContractError(f"Unsupported schema_version; expected {SEMANTIC_VERSION}")
     frozen_on = document["frozen_on"]
     if frozen_on is not None:
         try:
@@ -407,6 +560,8 @@ def load_feature_contract(path, *, dimensions=None, layer_order=None):
     history_len = document["recursive_history"]["history_len"]
     probe_steps = document["short_probe_dynamics"]["probe_steps"]
     _integer(history_len, where="history_len", minimum=1)
+    if history_len != 3:
+        raise ContractError("D10 requires history_len=3")
     _integer(probe_steps, where="probe_steps", minimum=1)
     dimensions = {} if dimensions is None else dimensions
     _mapping_keys(dimensions, (), ("num_lora_layers", "history_len"), where="dimensions")

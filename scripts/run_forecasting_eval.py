@@ -32,6 +32,7 @@ from src.third_eye.forecasting.data import fixed_split, from_records, read_jsonl
 from src.third_eye.forecasting.layout import contract_layout, legacy_layout
 from src.third_eye.forecasting.synthetic import make_synthetic_records
 from src.third_eye.forecasting.train import TrainConfig, cross_validate, fit, predict
+from src.third_eye.forecasting_handoff import load_handoff_spec, validate_handoff
 
 
 def _layout(name, bins, h1):
@@ -91,6 +92,56 @@ def _run_manifest(args, ds, cluster, report):
         print("wrote", out)
 
 
+def _run_d13(args, ds, report, handoff):
+    from src.third_eye.sprint2_evaluation import baseline_tables
+    manifest = json.loads(Path(args.split_manifest).read_text())
+    idx = fixed_split(ds, manifest)
+    if set(idx) != {"train", "val", "test"}:
+        raise ValueError("D13 fitting needs preassigned train/val/test groups; a train-only collection batch is validate-only")
+    if args.relative or args.ablate or args.rank_weight or "dynamics" in args.models.split(","):
+        raise ValueError("D13 initial path keeps PD, Dynamics and ranking/relative extras inactive")
+    if not args.out or Path(args.out).exists():
+        raise ValueError("D13 needs a fresh --out directory; existing results are never overwritten")
+    train, val, test = (ds.subset(idx[k]) for k in ("train", "val", "test"))
+    if handoff and not handoff[0]["synthetic_only"]:
+        from src.third_eye.sprint2_collection import inspect_bindings, load_config
+        if not args.collection_config:
+            raise ValueError("Real D13 fitting needs --collection-config and verified measurement provenance")
+        inspected = inspect_bindings(load_config(args.collection_config), Path(args.collection_config).resolve().parent)
+        if inspected[0] != handoff[0]:
+            raise ValueError("Real evaluation configuration differs from handoff")
+        from src.third_eye.sprint2_collection import validate_measured_records
+        validate_measured_records(ds_records=args._records, spec=handoff[0])
+    fitted, predictions, validation = {}, {}, {}
+    for kind in args.models.split(","):
+        cfg = TrainConfig(kind=kind, protocol="sprint2_d13", semantic_hash=ds.semantic_hash)
+        result = fit(train, val, cfg)
+        fitted[kind] = result
+        validation[kind] = {"best_epoch": result.best_epoch, "history": result.history,
+                             "selection": "validation LHV regret, then mean native H2 MSE (H1 proxy for one-step)"}
+        predictions[kind] = predict(result, test)
+    results = {"protocol": "sprint2_d13", "preliminary": True,
+        "synthetic": bool(handoff[0]["synthetic_only"]) if handoff else bool(args.synthetic),
+        "semantic_hash": ds.semantic_hash, "validation_structure": report.summary(),
+        "validation_selection": validation, "pd_active": False, "dynamics_active": False,
+        **baseline_tables(train, test, predictions, bootstrap=args.boot)}
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=False)
+    from src.third_eye.forecasting.train import save_fit
+    for kind, result in fitted.items():
+        save_fit(result, out/(kind+".pt"), metadata={"protocol": "sprint2_d13", "synthetic": results["synthetic"]})
+    with (out/"metrics.json").open("x") as f:
+        json.dump(results, f, indent=2, allow_nan=False)
+    with (out/"policy_table.csv").open("x", newline="") as f:
+        rows = [{"policy": name, **{k: value[k] for k in ("regret", "selected_utility", "top1", "tie_rate", "tie_size",
+                "selected_target_h2_delta", "selected_ood_h2_delta", "selected_retention_h2_delta", "n_groups", "n_states", "n_records")}}
+                for name, value in results["policy_table"].items()]
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    print("D13 preliminary outputs:", out, "; synthetic=", results["synthetic"])
+
+
 def main():
     ap = argparse.ArgumentParser()
     src = ap.add_mutually_exclusive_group(required=True)
@@ -107,25 +158,58 @@ def main():
     ap.add_argument("--rank-weight", type=float, default=0.0)
     ap.add_argument("--ablate", action="store_true")
     ap.add_argument("--validate-only", action="store_true")
+    ap.add_argument("--handoff-spec", help="Strict Sprint 2 raw-module JSON for validation or opt-in sprint2_d13")
+    ap.add_argument("--protocol", default="legacy", choices=["legacy", "sprint2_d13"])
+    ap.add_argument("--collection-config", help="Pinned real collection bindings for opt-in real D13 fitting")
+    ap.add_argument("--expected-semantic-hash", help="Reject absent or mismatched definition hashes")
     ap.add_argument("--history-rule", default="applied_h1", choices=["applied_h1", "applied_h2"],
-                    help="D10: which past results count as history (pending team decision)")
+                    help="D10: applied_h1 for Sprint 2; applied_h2 is not accepted for its handoff")
     ap.add_argument("--split-manifest", default=None,
                     help="JSON {lineage_group: train|val|test} (D02); evaluates train->test once, "
                          "instead of K-fold CV. Results are labelled preliminary.")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
-    layout = _layout(args.layout, args.depth_bins, args.h1_heads)
+    if args.handoff_spec and (args.synthetic or not args.split_manifest
+                              or (not args.validate_only and args.protocol != "sprint2_d13")):
+        ap.error("--handoff-spec requires records, manifest and validate-only or opt-in sprint2_d13")
+    if args.protocol == "sprint2_d13" and not args.handoff_spec:
+        ap.error("sprint2_d13 requires the strict raw-module handoff spec")
+    handoff = load_handoff_spec(args.handoff_spec) if args.handoff_spec else None
+    layout = handoff[2] if handoff else _layout(args.layout, args.depth_bins, args.h1_heads)
+    expected_hash = args.expected_semantic_hash
+    if handoff:
+        if args.history_rule != "applied_h1" or args.h1_heads != "all":
+            ap.error("Sprint 2 handoff requires applied_h1 and all three H1 heads")
+        if expected_hash and expected_hash != handoff[0]["semantic_hash"]:
+            ap.error("expected hash differs from handoff spec")
+        expected_hash = handoff[0]["semantic_hash"]
     records = (make_synthetic_records(layout, n_trajectories=60, states_per_trajectory=5,
                                       n_groups=12, history_rule=args.history_rule)
                if args.synthetic else read_jsonl(args.records))
-    report = validate_records(records, layout, history_rule=args.history_rule)
+    report = validate_records(records, layout, history_rule=args.history_rule,
+                              expected_semantic_hash=expected_hash)
+    ds = from_records(records, layout, validate=False)
+    if args.split_manifest:
+        manifest = json.loads(Path(args.split_manifest).read_text())
+        idx = fixed_split(ds, manifest)
+        print("split manifest:", {k: len(v) for k, v in idx.items()})
+    if handoff:
+        validate_handoff(records, *handoff, manifest=manifest)
+        if not handoff[0]["synthetic_only"]:
+            from src.third_eye.sprint2_collection import validate_measured_records
+            validate_measured_records(records, handoff[0])
+        print("Sprint 2 handoff: structural/provenance checks passed; "
+              "synthetic=%s; NOT real-data, Gate 1 or forecasting validation"
+              % handoff[0]["synthetic_only"])
     print("validation:", report.summary())
     for w in report.warnings:
         print("  WARNING:", w)
     if args.validate_only:
         return
-    ds = from_records(records, layout, validate=False)
+    if args.protocol == "sprint2_d13":
+        args._records = records
+        return _run_d13(args, ds, report, handoff)
     cluster = ds.group if len(np.unique(ds.group)) > 1 else None
     if args.relative:
         ds = ds.with_relative_candidates()

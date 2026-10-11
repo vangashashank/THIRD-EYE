@@ -1,0 +1,20 @@
+version: sprint2-cap-calibration-v1
+model:
+  name: Qwen/Qwen3-4B
+  revision: 1cfa9a7208912126459214e8b04321603b3df60c
+  quantization: nf4
+  local_files_only: true
+initial_cap: 512
+prompts_per_task: 50
+minimum_correct: 30  # Pilot evidence-screening proposal, not reliable population-p99 evidence.
+selection_seed: 20261010
+training_group_ids: []  # Bind the preassigned forecaster TRAIN groups, never held-out groups.
+# Actual task IDs/manifests are unresolved; fail before any model load until bound.
+# Example binding only (not a research task approval or an included dataset):
+# - task_id: ACTUAL_TASK_ID
+#   training_manifest: ../data/ACTUAL_TRAINING_MANIFEST.json
+#   answer_rule: final_numeric_line_v1
+# Supported alternatives: final_choice_line_v1, exactly uppercase A-D.
+# Both stop at one complete "Final answer: VALUE" line outside <think>.
+# A line terminates with newline or EOS; incomplete answers at 512 are censored.
+tasks: []

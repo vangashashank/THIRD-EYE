@@ -1,0 +1,73 @@
+# Preparation only. Null/empty bindings fail offline before a model is loaded.
+# Do not copy smoke datasets or infer approvals from this file.
+version: sprint2-collection-v1
+model:
+  name: Qwen/Qwen3-4B
+  revision: 1cfa9a7208912126459214e8b04321603b3df60c
+  quantization: nf4
+  local_files_only: true
+task: null
+lora:  # Reuse supported pinned smoke hyperparameters, per pilot instruction.
+  r: 8
+  alpha: 16
+  dropout: 0.05
+  target_modules: [q_proj, v_proj]
+corpus_version: null
+handoff_spec: ../runs/sprint2_qwen3_4b_handoff_spec.json  # Destination only; not sealed evidence yet.
+module_manifest: []  # qualified_name, block_index, projection, a_name/a_shape, b_name/b_shape
+placement_order: [q_proj, v_proj]
+lineage_plan: null   # complete preassigned 12-group recipes/membership/splits/identities
+roots: {}           # trajectory_id: cached adapter path + metadata/checksums
+datasets: {}        # target/ood/retention/confidence/anchor_probe/val_probe/retention_gradient/final
+adaptation_manifests: {}  # group_id: actual LM-training manifest
+allowed_diagnostic_overlaps:
+  - [target, val_probe]
+  - [retention, anchor_probe]
+  - [retention, retention_gradient]
+  - [anchor_probe, retention_gradient]
+task_rules: {}      # actual task_id: final_numeric_line_v1 or final_choice_line_v1
+generation_caps: {} # frozen measured task caps, never adapted using held-out results
+caps_frozen_before_collection: false  # Set only after measured-cap review, not a schema freeze.
+caps_review_reference: null
+calibration_reports: []
+chat_template_sha256: null
+definition_agreements:
+  D12: User pilot configuration instruction, 2026-10-11; feature reductions remain unresolved.
+  D14: User pilot preparation instruction, 2026-10-11; limits provisional, no execution authorization.
+definitions: {}     # supported implementation IDs/reductions/thresholds, pinned before outcomes
+candidate_recipes:
+  - {candidate_id: 0, prompt_count: 32}
+  - {candidate_id: 1, prompt_count: 32}
+  - {candidate_id: 2, prompt_count: 32}
+continuation:
+  exclude_h1: true
+  candidate_master_seed: 20261010  # Reproducible master; all streams separately identity-keyed.
+  master_seed: 20261010
+  prompt_count: 32
+  prompt_pools: {}  # Actual adaptation pools still unbound; H2 excludes the H1 union.
+  recipe: null     # Bound exactly to approved update and unresolved generation/correction definitions.
+selection_policy: uniform_state_seed_v1
+selection_seed: 20261010
+update:
+  steps: 32
+  learning_rate: 0.0001
+  weight_decay: 0.01  # Existing AdamW default, now pinned explicitly.
+  betas: [0.9, 0.999]
+  eps: 0.00000001
+  max_length: 128  # Existing supported bound; fail on lost answer spans, review if inadequate.
+  batch_size: 1
+  gradient_accumulation: 1
+  cycling: sealed_prompt_order_v1
+  scheduler: none
+probe:
+  steps: 15
+  cadence: [0, 5, 10, 15]
+  optimizer: {lr: 0.0001, weight_decay: 0.01, betas: [0.9, 0.999], eps: 0.00000001}
+  scheduler: none
+diagnostic_counts: {target: 32, ood: 32, retention: 256, anchor_probe: 32, retention_gradient: 32, val_probe: 32}
+retention:
+  policy: retain_all_v1
+  max_device_seconds: 7200
+  max_output_bytes: 5368709120
+  mig_profile: null  # Inspect actual allocation/cache/quota; do not assume fit.
+  device_total_memory_bytes: null  # Bind the actual MIG runtime property, not full-GPU memory.
