@@ -107,6 +107,8 @@ def main():
     ap.add_argument("--rank-weight", type=float, default=0.0)
     ap.add_argument("--ablate", action="store_true")
     ap.add_argument("--validate-only", action="store_true")
+    ap.add_argument("--semantic-hash", default=None,
+                    help="D15: reject records whose semantic_hash differs (get it from print_semantic_spec)")
     ap.add_argument("--history-rule", default="applied_h1", choices=["applied_h1", "applied_h2"],
                     help="D10: which past results count as history (pending team decision)")
     ap.add_argument("--split-manifest", default=None,
@@ -119,7 +121,8 @@ def main():
     records = (make_synthetic_records(layout, n_trajectories=60, states_per_trajectory=5,
                                       n_groups=12, history_rule=args.history_rule)
                if args.synthetic else read_jsonl(args.records))
-    report = validate_records(records, layout, history_rule=args.history_rule)
+    report = validate_records(records, layout, history_rule=args.history_rule,
+                              expected_semantic_hash=args.semantic_hash)
     print("validation:", report.summary())
     for w in report.warnings:
         print("  WARNING:", w)

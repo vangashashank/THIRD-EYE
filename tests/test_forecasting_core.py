@@ -99,6 +99,14 @@ class FeatureDefinitionTests(unittest.TestCase):
         exact = " ".join("w%d" % i for i in range(12))                    # 10 trigrams
         self.assertAlmostEqual(F.duplicate_rate([exact, " ".join(exact.split()[:11])], 0.90), 0.5)  # Jaccard = 0.90 exactly
         self.assertEqual(F.duplicate_rate(["the answer is 12 for sure ok", "the answer is 13 for sure ok"], 0.90), 0.0)  # numbers matter
+        # exact threshold, no tolerance: Jaccard 0.9 links at 0.90, 0.8 does not
+        ten = " ".join("w%d" % i for i in range(12))                     # 10 trigrams
+        nine = " ".join(ten.split()[:11])                                 # 9 trigrams, Jaccard 0.9
+        eight = " ".join(ten.split()[:10])                                # 8 trigrams, Jaccard 0.8
+        self.assertEqual(F.duplicate_rate([ten, nine], 0.90), 0.5)
+        self.assertEqual(F.duplicate_rate([ten, eight], 0.90), 0.0)
+        self.assertEqual(F.duplicate_rate([ten, nine], 0.9000001), 0.0)   # tolerance would have linked these
+        self.assertEqual(F.duplicate_rate(["a b", "a  b", "a b c"]), 1 / 3)   # <3 tokens: exact normalised equality
         # 9/10 trigram overlap links at 0.90, not at 0.95
         base = " ".join("w%d" % i for i in range(12))                    # 10 trigrams
         near = base + " extra"                                           # 11 trigrams, Jaccard 10/11 = .909
@@ -124,7 +132,20 @@ class FeatureDefinitionTests(unittest.TestCase):
         self.assertAlmostEqual(F.sign_agreement([1, -1, 0, 2], [1, 1, 5, -2]), 0.25)
         self.assertAlmostEqual(F.sign_agreement([3, 4], [3, -4]), 0.5)      # Shashank's check
         self.assertEqual(F.sign_agreement([0, 0], [0, 0]), 1.0)             # zeros agree...
-        self.assertEqual(F.zero_sign_stats([0, 0, 1, 1], [0, 1, 0, 1])["zero_in_both"], 0.25)  # ...so log them
+        zs = F.zero_sign_stats([0, 0, 1, 1], [0, 1, 0, 1])                  # ...so log COUNTS
+        self.assertEqual((zs["zero_count_a"], zs["zero_count_b"], zs["zero_count_both"], zs["n_elements"]), (2, 2, 1, 4))
+        gs = F.gradient_stats([3.0, 4.0], [3.0, -4.0])
+        self.assertAlmostEqual(gs["grad_norm"], 5.0)
+        self.assertAlmostEqual(gs["grad_cosine_retention"], -0.28)
+        self.assertEqual(gs["sign_agreement"], 0.5)
+        self.assertEqual(gs["diagnostics"]["zero_count_both"], 0)
+        for bad in ([], [1.0, float("nan")], [float("inf"), 1.0]):          # D09: reject empty / non-finite
+            with self.assertRaises(ValueError):
+                F.grad_l2_norm(bad)
+            with self.assertRaises(ValueError):
+                F.sign_agreement(bad, bad)
+            with self.assertRaises(ValueError):
+                F.grad_cosine(bad, bad)
         self.assertEqual(F.sign_agreement([0, 0], [1, 1]), 0.0)
         with self.assertRaises(ValueError):
             F.grad_l2_norm([1.0, float("nan")])
@@ -135,13 +156,21 @@ class FeatureDefinitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             F.linear_slope([1.0])
         z = np.random.RandomState(0).normal(size=(4, 7))
-        self.assertAlmostEqual(F.mean_token_kl(z, z), 0.0, places=12)
+        self.assertAlmostEqual(F.kl_drift_anchor(z, z, [0, 0, 1, 1]), 0.0, places=12)
         p, q = np.log([[0.5, 0.5]]), np.log([[0.9, 0.1]])
         expected = 0.5 * np.log(0.5 / 0.9) + 0.5 * np.log(0.5 / 0.1)
-        self.assertAlmostEqual(F.mean_token_kl(p, q), expected, places=9)
-        self.assertGreater(abs(F.mean_token_kl(p, q) - F.mean_token_kl(q, p)), 0.05)  # asymmetric
-        both = np.vstack([p, q])
-        self.assertAlmostEqual(F.mean_token_kl(both, np.vstack([p, p]), mask=[1, 0]), 0.0)
+        self.assertAlmostEqual(F.kl_drift_anchor(p, q, [0]), expected, places=9)       # parent || post
+        self.assertGreater(abs(F.kl_drift_anchor(p, q, [0]) - F.kl_drift_anchor(q, p, [0])), 0.05)
+        # D12: average within each answer, THEN equally across answers (not pooled over positions)
+        pre = np.vstack([p, p, p])                       # answer 0 has 1 position, answer 1 has 2
+        post = np.vstack([q, p, p])                      # only answer 0's position drifts
+        self.assertAlmostEqual(F.kl_drift_anchor(pre, post, [0, 1, 1]), expected / 2, places=9)   # pooled would be /3
+        self.assertAlmostEqual(F.kl_drift_anchor(pre, post, [0, 1, 1], valid_mask=[1, 1, 0]), expected / 2, places=9)
+        with self.assertRaises(ValueError):
+            F.kl_drift_anchor(pre, post, [0, 1, 1], valid_mask=[0, 0, 0])
+        with self.assertRaises(ValueError):                                   # an answer with no valid position
+            F.kl_drift_anchor(pre, post, [0, 1, 1], valid_mask=[1, 0, 0])
+        self.assertAlmostEqual(F.probe_loss([[2.0] * 5, [3.0]]), 2.5)         # probe losses use D08 reduction
         self.assertAlmostEqual(F.param_delta_norm([0, 0], [3, 4]), 5.0)
 
 
@@ -611,6 +640,22 @@ class DecisionUpdateTests(unittest.TestCase):
         as_str = M.bootstrap_ci(M.m_within_state_spearman, t, p, sid, n_boot=50, cluster_index=names)
         self.assertEqual(as_str["n_units"], 20)
         self.assertEqual(len(M.per_group_report(t, p, sid, np.array(["a", "b"])[np.repeat([0, 1], 60)])), 2)
+
+    def test_d15_spec_hash_covers_formulas_and_pinned_revision(self):
+        base = SemanticConfig()
+        self.assertFalse(base.pinned)
+        with self.assertRaises(ValueError):
+            base.fingerprint(require_pinned=True)
+        pinned = SemanticConfig(base_revision="abc123")
+        self.assertTrue(pinned.pinned)
+        self.assertNotEqual(base.fingerprint(), pinned.fingerprint())          # revision is part of the hash
+        self.assertEqual(pinned.fingerprint(), SemanticConfig(base_revision="abc123").fingerprint())
+        edited = SemanticConfig(base_revision="abc123",
+                                definitions={**pinned.definitions, "D08_nll": "token weighted"})
+        self.assertNotEqual(pinned.fingerprint(), edited.fingerprint())        # formula text is part of it
+        self.assertNotEqual(pinned.fingerprint(), SemanticConfig(base_revision="abc123", duplicate_threshold="0.95").fingerprint())
+        self.assertEqual(pinned.probe_eval_steps, (0, 5, 10, 15))
+        self.assertEqual(len(pinned.probe_train_steps), 15)
 
     def test_d15_semantic_hash_changes_with_definitions(self):
         base = SemanticConfig()
