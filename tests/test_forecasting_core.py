@@ -53,16 +53,31 @@ class FeatureDefinitionTests(unittest.TestCase):
     def test_data_statistics(self):
         self.assertEqual(F.token_length_stats([2, 4]), [3.0, 1.0])
         self.assertEqual(F.token_length_stats([7]), [7.0, 0.0])
-        # token-weighted (13/6), not mean of per-example means (2.5)
-        self.assertAlmostEqual(F.token_weighted_nll([10.0, 3.0], [5, 1]), 13 / 6)
-        mean, std = F.sequence_confidence([[-1.0, -3.0], [-2.0]])
+        # D08: mean of per-answer means (a long answer does not dominate)
+        self.assertAlmostEqual(F.mean_answer_nll([[2.0] * 5, [3.0]]), 2.5)       # token-weighted would be 13/6
+        with self.assertRaises(ValueError):
+            F.mean_answer_nll([])
+        with self.assertRaises(ValueError):
+            F.mean_answer_nll([[1.0], []])
+        # D06: answer log scores -1 and -3 -> mean -2, population std 1; singleton std 0
+        self.assertEqual(F.sequence_confidence([[-1.0], [-3.0]]), [-2.0, 1.0])
+        self.assertEqual(F.sequence_confidence([[-2.0, -4.0]])[1], 0.0)
+        mean, std = F.sequence_confidence([[-1.0, -3.0], [-2.0]])               # equal weight per answer
         self.assertAlmostEqual(mean, -2.0)
         self.assertAlmostEqual(std, 0.0)
+        with self.assertRaises(ValueError):
+            F.sequence_confidence([])
         self.assertEqual(F.verifier_pass_rate([True, True, False, False]), 0.5)
         with self.assertRaises(ValueError):
             F.verifier_pass_rate([])
-        self.assertAlmostEqual(
-            F.difficulty_proxy([[True, False, False, False], [False] * 4]), (0.75 + 1.0) / 2)
+        # D08: original failures / unique attempted source examples (corrections don't change it)
+        self.assertEqual(F.difficulty_proxy([True, True, False, False]), 0.5)
+        with self.assertRaises(ValueError):
+            F.difficulty_proxy([])
+        h = np.array([[1.0, 0], [3.0, 0], [100.0, 100.0]])
+        np.testing.assert_allclose(F.mean_pool_hidden(h, [False, False, True]), [2.0, 0.0])   # specials excluded
+        with self.assertRaises(ValueError):
+            F.mean_pool_hidden(h, [True, True, True])
 
     def test_embedding_diversity(self):
         self.assertAlmostEqual(F.embedding_diversity(np.eye(2)), 1.0)
@@ -81,6 +96,9 @@ class FeatureDefinitionTests(unittest.TestCase):
         self.assertAlmostEqual(F.duplicate_rate(["  " + A.replace(" ", "   ") + " ", A]), 0.5)  # whitespace
         self.assertEqual(F.duplicate_rate([A, A.upper()]), 0.0)          # case is kept
         self.assertAlmostEqual(F.duplicate_rate(["yes", "yes", "no"]), 1 / 3)   # <3 tokens: exact match
+        exact = " ".join("w%d" % i for i in range(12))                    # 10 trigrams
+        self.assertAlmostEqual(F.duplicate_rate([exact, " ".join(exact.split()[:11])], 0.90), 0.5)  # Jaccard = 0.90 exactly
+        self.assertEqual(F.duplicate_rate(["the answer is 12 for sure ok", "the answer is 13 for sure ok"], 0.90), 0.0)  # numbers matter
         # 9/10 trigram overlap links at 0.90, not at 0.95
         base = " ".join("w%d" % i for i in range(12))                    # 10 trigrams
         near = base + " extra"                                           # 11 trigrams, Jaccard 10/11 = .909
@@ -92,6 +110,10 @@ class FeatureDefinitionTests(unittest.TestCase):
     def test_gradient_features(self):
         self.assertAlmostEqual(F.grad_l2_norm([3.0, 4.0]), 5.0)
         a = np.array([1.0, 2.0, 3.0])
+        self.assertAlmostEqual(F.grad_l2_norm([3.0, 4.0]), 5.0)
+        self.assertAlmostEqual(F.grad_cosine([3, 4], [3, -4]), -0.28)            # D09 check
+        cos, flags = F.cosine_with_diagnostic(np.zeros(2), [1.0, 1.0])
+        self.assertEqual((cos, flags["zero_norm_a"], flags["zero_norm_b"]), (0.0, True, False))
         self.assertAlmostEqual(F.grad_cosine(a, a), 1.0)
         self.assertAlmostEqual(F.grad_cosine(a, -a), -1.0)
         self.assertAlmostEqual(F.grad_cosine([1, 0], [0, 1]), 0.0)

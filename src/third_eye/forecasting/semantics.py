@@ -19,7 +19,7 @@ class SemanticConfig:
     lhv_weights: Tuple[float, float, float] = (0.50, 0.25, 0.25)   # D04
     history_rule: str = "applied_h1"       # D10 (pending): applied_h1 | applied_h2
     scoring: str = "accuracy_fraction_delta_vs_parent"             # D04/D06
-    schema_version: str = "0.1-pilot+d05d07d09"
+    schema_version: str = "0.2-pilot+d05-d09"
 
     def __post_init__(self):
         if self.history_rule not in HISTORY_RULES:
