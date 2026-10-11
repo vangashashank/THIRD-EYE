@@ -278,5 +278,68 @@ class HandoffTests(unittest.TestCase):
                 write_fixture(out)
 
 
+class SemanticHashCliTests(unittest.TestCase):
+    """Both contributors' CLI options; synthetic records only, no fitting."""
+
+    def invoke(self, argv):
+        with patch("sys.argv", ["run_forecasting_eval", *argv]), \
+                patch.object(cli, "fit") as fit, \
+                patch.object(cli, "cross_validate") as cross_validate, \
+                contextlib.redirect_stdout(io.StringIO()) as stdout:
+            cli.main()
+        fit.assert_not_called()
+        cross_validate.assert_not_called()
+        return stdout.getvalue()
+
+    def test_each_hash_flag_enforces_plain_record_hash(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "SYNTHETIC-records.jsonl"
+            rows = cli.make_synthetic_records(cli._layout("contract", 6, "all"),
+                n_trajectories=3, states_per_trajectory=2, n_groups=3,
+                semantic_hash="synthetic-definitions-only")
+            path.write_text("".join(json.dumps(r, allow_nan=False) + "\n" for r in rows))
+            base = ["--records", str(path), "--validate-only"]
+            for flag in ("--semantic-hash", "--expected-semantic-hash"):
+                with self.subTest(flag=flag):
+                    self.assertIn("validation:", self.invoke([*base, flag, "synthetic-definitions-only"]))
+                    with self.assertRaisesRegex(ValueError, "semantic_hash"):
+                        self.invoke([*base, flag, "different-synthetic-definitions"])
+            for row in rows:
+                row.pop("semantic_hash")
+            path.write_text("".join(json.dumps(r, allow_nan=False) + "\n" for r in rows))
+            for flag in ("--semantic-hash", "--expected-semantic-hash"):
+                with self.subTest(missing_hash=flag), self.assertRaisesRegex(ValueError, "semantic_hash"):
+                    self.invoke([*base, flag, "synthetic-definitions-only"])
+
+    def test_each_hash_flag_preserves_strict_handoff_checks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            out = write_fixture(Path(temp) / "SYNTHETIC-handoff")
+            spec = json.loads((out / "handoff_spec.json").read_text())
+            base = ["--records", str(out / "records.jsonl"), "--validate-only",
+                    "--split-manifest", str(out / "split_manifest.json"),
+                    "--handoff-spec", str(out / "handoff_spec.json")]
+            for flag in ("--semantic-hash", "--expected-semantic-hash"):
+                with self.subTest(flag=flag):
+                    self.assertIn("synthetic=True", self.invoke([*base, flag, spec["semantic_hash"]]))
+                    with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                        self.invoke([*base, flag, "wrong-synthetic-hash"])
+                    self.assertEqual(raised.exception.code, 2)
+            self.assertIn("synthetic=True", self.invoke([*base,
+                "--semantic-hash", spec["semantic_hash"],
+                "--expected-semantic-hash", spec["semantic_hash"]]))
+            (out / "split_manifest.json").write_text("{}")
+            with self.assertRaisesRegex(ValueError, "manifest"):
+                self.invoke([*base, "--semantic-hash", spec["semantic_hash"]])
+
+    def test_conflicting_or_empty_hashes_fail_before_record_read(self):
+        for flags in (["--semantic-hash", "a", "--expected-semantic-hash", "b"],
+                      ["--semantic-hash", ""], ["--expected-semantic-hash", ""]):
+            with self.subTest(flags=flags), patch.object(cli, "read_jsonl") as read, \
+                    contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                self.invoke(["--records", "SYNTHETIC-do-not-read.jsonl", "--validate-only", *flags])
+            self.assertEqual(raised.exception.code, 2)
+            read.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

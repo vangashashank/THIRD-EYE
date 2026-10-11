@@ -162,6 +162,8 @@ def main():
     ap.add_argument("--protocol", default="legacy", choices=["legacy", "sprint2_d13"])
     ap.add_argument("--collection-config", help="Pinned real collection bindings for opt-in real D13 fitting")
     ap.add_argument("--expected-semantic-hash", help="Reject absent or mismatched definition hashes")
+    ap.add_argument("--semantic-hash", default=None,
+                    help="D15: reject records whose semantic_hash differs (get it from print_semantic_spec)")
     ap.add_argument("--history-rule", default="applied_h1", choices=["applied_h1", "applied_h2"],
                     help="D10: applied_h1 for Sprint 2; applied_h2 is not accepted for its handoff")
     ap.add_argument("--split-manifest", default=None,
@@ -170,6 +172,11 @@ def main():
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 
+    if (args.expected_semantic_hash is not None and args.semantic_hash is not None
+            and args.expected_semantic_hash != args.semantic_hash):
+        ap.error("--semantic-hash and --expected-semantic-hash must match when both are supplied")
+    if args.expected_semantic_hash == "" or args.semantic_hash == "":
+        ap.error("An explicitly supplied semantic hash must be nonempty")
     if args.handoff_spec and (args.synthetic or not args.split_manifest
                               or (not args.validate_only and args.protocol != "sprint2_d13")):
         ap.error("--handoff-spec requires records, manifest and validate-only or opt-in sprint2_d13")
@@ -177,7 +184,7 @@ def main():
         ap.error("sprint2_d13 requires the strict raw-module handoff spec")
     handoff = load_handoff_spec(args.handoff_spec) if args.handoff_spec else None
     layout = handoff[2] if handoff else _layout(args.layout, args.depth_bins, args.h1_heads)
-    expected_hash = args.expected_semantic_hash
+    expected_hash = args.expected_semantic_hash if args.expected_semantic_hash is not None else args.semantic_hash
     if handoff:
         if args.history_rule != "applied_h1" or args.h1_heads != "all":
             ap.error("Sprint 2 handoff requires applied_h1 and all three H1 heads")

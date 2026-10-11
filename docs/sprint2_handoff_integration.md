@@ -1,5 +1,49 @@
 # Sprint 2 Handoff Integration
 
+## Code Integration Update (2026-10-11)
+
+Fetched origin before integration. The reviewed local commit
+`2c20d3666b90ab662c5bf178b680835e193caf58` and Mahitha's latest commits
+`38ce3d0fe26dcdaf96b2c5e10240549129ca199b` and
+`0948ba4fa1a363b00942a5051b2813eb41b9825e` are retained in merge history.
+The only textual conflict was [run_forecasting_eval.py](../scripts/run_forecasting_eval.py).
+Both `--semantic-hash` and `--expected-semantic-hash` are retained; conflicting
+or empty explicit values fail before records are read. Either spelling enforces
+the same exact expected hash. A supplied handoff spec remains authoritative;
+no hash is translated, truncated or substituted to make incompatible records pass.
+Strict manifest/provenance validation and opt-in D13 evaluation remain intact.
+
+**Code integration is not feature-definition agreement or real-data readiness.**
+Mahitha's new helpers/specification are preserved verbatim. The isolated
+collector, its configuration gates, raw-module handoff and Sprint 1 are unchanged.
+The new upstream commit/spec calls its definitions confirmed/agreed; this merge
+does not infer joint approval or populate missing collector agreement references.
+The older comparisons below and the quick decision sheet refer to `dcd403a`,
+not to the newly fetched implementation. The remaining non-equivalences are:
+
+| Area | New upstream implementation | Preserved isolated collector / handoff |
+| --- | --- | --- |
+| D08/D09 NLL | Equal-answer mean of token means, also specified for gradients. | Explicit equal-answer or token-weighted choice, still unbound; no default accepted here. |
+| D07 duplicates | Exact rational Jaccard >= .90, no tolerance. | Floating-point comparison with explicitly supplied threshold/tolerance; definitions still unbound. |
+| D05 layout | Optional relative-depth gradient-energy bins remain in the upstream feature specification. | Accepted raw ordered module A/B joint gradient norms; no conversion to bins. These layouts are separate, not interchangeable. |
+| D09 diagnostics | Near-zero cosine flags at norm < 1e-12 and integer zero counts. | Explicit epsilon with <= comparison, exact-zero flags and zero-element fractions; no invented conversion or replacement measurement. |
+| Probe train slope / KL | Optimizer losses at 1..15; per-answer equal-weight KL, float64 log-softmax, per-position clipping. | Fixed-batch train loss at 0/5/10/15; pooled answer-position KL, float32 log-softmax, final-mean clipping. No formula chosen by this merge. |
+| D15 specification | `SemanticConfig` schema `0.3-d05-d12-agreed`, formula/base-revision specification and 16-character fingerprint. | Schema `0.2-sprint2`, raw layout plus complete sealed binding specification and 64-character digest. One is not a substitute for the other. |
+
+These implementations can coexist without selecting a formula for collection.
+Reconciliation before real collection must be explicit, versioned and tested;
+missing sources/scorers, independent roots/8-2-2 assignment, calibration,
+runtime module/template/MIG evidence and execution authorization remain blockers.
+The collector still stops offline before loading a model with its unbound config.
+No schema is frozen and no real records, calibration, labels or Gate 1 are claimed.
+
+Verification: **199 offline regression tests passed**, including Sprint 1,
+both forecasting implementations and three new synthetic CLI regression tests.
+The focused handoff suite passed 28 tests. Fixture success is structural only,
+not forecasting validation. No GPU jobs, downloads or ignored artifacts were added.
+
+## Original Integration Review (Historical)
+
 Reviewed 2026-10-11 against fetched `origin/mahitha/forecasting` at
 `dcd403af9e0b8dd2e79ad1b5bcae987b8785eddb`, initially in the isolated
 `mahitha-handoff-review` worktree. Its two commits descend from local

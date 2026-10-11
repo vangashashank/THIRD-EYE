@@ -12,6 +12,7 @@ feature column, so bump the layout name / schema version when you do.
 from __future__ import annotations
 
 import unicodedata
+from fractions import Fraction
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -84,25 +85,35 @@ def token_length_stats(lengths: Sequence[int]) -> List[float]:
     return [float(x.mean()), float(x.std())]
 
 
-def token_weighted_nll(nll_sums: Sequence[float], token_counts: Sequence[int]) -> float:
-    """``pre_update_nll``: sum of token NLLs / sum of tokens, over answer tokens.
+def mean_answer_nll(per_answer_token_nlls: Sequence[Sequence[float]]) -> float:
+    """D08 ``pre_update_nll``: mean over answers of each answer's mean-token NLL.
 
-    Token-weighted across the batch (not a mean of per-example means).
+    Answer tokens only (as in D06); every answer weighs the same, so long
+    answers do not dominate.  This is also the loss D09 differentiates.  It is
+    NOT the token-weighted batch mean (that is what legacy full-text loss does).
     """
-    s = np.asarray(nll_sums, dtype=np.float64)
-    n = np.asarray(token_counts, dtype=np.float64)
-    if s.shape != n.shape or n.sum() <= 0:
-        raise ValueError("need matching, non-empty arrays with >0 tokens")
-    return float(s.sum() / n.sum())
+    if len(per_answer_token_nlls) == 0:
+        raise ValueError("empty batch")
+    means = []
+    for nll in per_answer_token_nlls:
+        nll = np.asarray(nll, dtype=np.float64)
+        if nll.size == 0 or not np.all(np.isfinite(nll)):
+            raise ValueError("an answer has no (finite) answer tokens")
+        means.append(nll.mean())
+    return float(np.mean(means))
 
 
 def sequence_confidence(per_example_token_logprobs: Sequence[Sequence[float]]) -> List[float]:
-    """(mean, population std) over examples of the mean answer-token log-prob.
+    """D06: (mean, population std) over answers of each answer's mean token log-prob.
 
-    Used for ``mean_confidence`` (the batch's own corrected answers) and for
+    Final-answer span only (no prompt, reasoning, padding or special tokens);
+    equal weight per answer; log scores, not probabilities.  Answers with log
+    scores -1 and -3 give (-2, 1).  Used for ``mean_confidence`` (the batch's own corrected answers) and for
     ``gen_confidence_mean/std`` (a probe set).  Values are <= 0; higher means
     more confident.  Prompt tokens must already be excluded.
     """
+    if len(per_example_token_logprobs) == 0:
+        raise ValueError("empty set: confidence is undefined, not a fake finite value")
     per = []
     for lp in per_example_token_logprobs:
         lp = np.asarray(lp, dtype=np.float64)
@@ -121,20 +132,29 @@ def verifier_pass_rate(passed: Sequence[bool]) -> float:
     return float(p.mean())
 
 
-def difficulty_proxy(per_prompt_attempt_passes: Sequence[Sequence[bool]]) -> float:
-    """Mean over prompts of (1 - pass rate of the *current* model M_t).
+def difficulty_proxy(original_failed: Sequence[bool]) -> float:
+    """D08: original failures / unique attempted source examples, before correction.
 
-    Needs several sampled attempts per training prompt (>= 4 recommended).
-    With a single greedy attempt on prompts that were selected *because* they
-    failed, every value is 1.0 and the feature is constant.
+    ``original_failed[i]`` says whether the PARENT failed unique source example
+    i on its first attempt; later successful corrections do not change it.
+    Informative only if the attempted pool contains parent successes too; if the
+    pool is just failures it is constant 1.0.
     """
-    rates = []
-    for attempts in per_prompt_attempt_passes:
-        a = np.asarray(attempts, dtype=bool)
-        if a.size == 0:
-            raise ValueError("a prompt has no attempts")
-        rates.append(1.0 - a.mean())
-    return float(np.mean(rates))
+    f = np.asarray(original_failed, dtype=bool)
+    if f.size == 0:
+        raise ValueError("no attempted source examples")
+    return float(f.mean())
+
+
+def mean_pool_hidden(hidden: np.ndarray, is_special: Sequence[bool]) -> np.ndarray:
+    """D08 diversity input for ONE example: mean of last-layer hidden states over
+    non-special tokens ([tokens, d] -> [d]), from the frozen base with no adapters.
+    Feed the stacked vectors to ``embedding_diversity`` (which L2-normalises)."""
+    h = np.asarray(hidden, dtype=np.float64)
+    keep = ~np.asarray(is_special, dtype=bool)
+    if h.ndim != 2 or keep.shape != (h.shape[0],) or not keep.any():
+        raise ValueError("need [tokens, d] hidden states and at least one non-special token")
+    return h[keep].mean(axis=0)
 
 
 def _unit_rows(emb: np.ndarray) -> np.ndarray:
@@ -181,6 +201,7 @@ def duplicate_rate(texts: Sequence[str], threshold: float = 0.90) -> float:
     n = len(texts)
     if n == 0:
         raise ValueError("empty batch")
+    limit = Fraction(str(threshold))             # exact: no floating-point tolerance
     toks = [_normalise_text(t) for t in texts]
     grams = [_trigrams(t) for t in toks]
     parent = list(range(n))
@@ -197,7 +218,7 @@ def duplicate_rate(texts: Sequence[str], threshold: float = 0.90) -> float:
                 same = toks[i] == toks[j]
             else:
                 union = len(grams[i] | grams[j])
-                same = union > 0 and len(grams[i] & grams[j]) / union >= threshold - 1e-12
+                same = union > 0 and Fraction(len(grams[i] & grams[j]), union) >= limit
             if same:
                 parent[find(i)] = find(j)
     return float((n - len({find(i) for i in range(n)})) / n)
@@ -206,20 +227,27 @@ def duplicate_rate(texts: Sequence[str], threshold: float = 0.90) -> float:
 # --------------------------------------------------------------------------
 # Gradient / interference
 # --------------------------------------------------------------------------
-def grad_l2_norm(flat_grad: np.ndarray) -> float:
-    """L2 norm of the flattened LoRA gradient (A and B), token-mean CE loss,
-    after AMP unscaling, before clipping."""
-    g = np.asarray(flat_grad, dtype=np.float64).ravel()
+def _checked(g, name="gradient") -> np.ndarray:
+    """D09: reject empty or non-finite gradients."""
+    g = np.asarray(g, dtype=np.float64).ravel()
+    if g.size == 0:
+        raise ValueError("empty %s" % name)
     if not np.all(np.isfinite(g)):
-        raise ValueError("non-finite gradient")
-    return float(np.linalg.norm(g))
+        raise ValueError("non-finite %s" % name)
+    return g
+
+
+def grad_l2_norm(flat_grad: np.ndarray) -> float:
+    """D09: L2 norm of the flattened gradient over the FULL trainable LoRA A/B
+    manifest, of the D08 mean answer NLL (mean of per-answer means), at the same
+    parent in eval mode, unscaled and before clipping or optimizer steps."""
+    return float(np.linalg.norm(_checked(flat_grad)))
 
 
 def grad_cosine(g_a: np.ndarray, g_b: np.ndarray) -> float:
-    """Cosine of two flat gradients over the same parameter manifest.  A zero
-    vector gives 0.0 (no evidence of alignment)."""
-    a = np.asarray(g_a, dtype=np.float64).ravel()
-    b = np.asarray(g_b, dtype=np.float64).ravel()
+    """Cosine = dot / (norm_a * norm_b) over the same parameter manifest.  0.0 if
+    either norm is zero (use ``gradient_stats`` to see the flag)."""
+    a, b = _checked(g_a), _checked(g_b)
     if a.shape != b.shape:
         raise ValueError("gradients must have the same parameter manifest")
     na, nb = np.linalg.norm(a), np.linalg.norm(b)
@@ -228,25 +256,45 @@ def grad_cosine(g_a: np.ndarray, g_b: np.ndarray) -> float:
     return float(np.dot(a, b) / (na * nb))
 
 
+def cosine_with_diagnostic(g_a: np.ndarray, g_b: np.ndarray) -> Tuple[float, Dict[str, bool]]:
+    """D09 cosine = dot / (norm_a * norm_b); 0.0 if either norm is zero, with a
+    provenance flag so a zero is never mistaken for 'orthogonal'."""
+    a, b = _checked(g_a), _checked(g_b)
+    zero_a, zero_b = bool(np.linalg.norm(a) < _EPS), bool(np.linalg.norm(b) < _EPS)
+    return grad_cosine(a, b), {"zero_norm_a": zero_a, "zero_norm_b": zero_b}
+
+
 def sign_agreement(g_a: np.ndarray, g_b: np.ndarray) -> float:
     """D09: fraction of ALL aligned elements with equal sign, sign(0) = 0.
 
     Two zeros therefore agree.  Always log ``zero_sign_stats`` next to it: zero
     gradients (e.g. LoRA A-matrices while B is still 0) inflate agreement.
     """
-    a = np.asarray(g_a, dtype=np.float64).ravel()
-    b = np.asarray(g_b, dtype=np.float64).ravel()
-    if a.shape != b.shape or a.size == 0:
-        raise ValueError("gradients must share one non-empty parameter manifest")
+    a, b = _checked(g_a), _checked(g_b)
+    if a.shape != b.shape:
+        raise ValueError("gradients must share one parameter manifest")
     return float(np.mean(np.sign(a) == np.sign(b)))
 
 
 def zero_sign_stats(g_a: np.ndarray, g_b: np.ndarray) -> Dict[str, float]:
-    """Provenance diagnostic for ``sign_agreement``: share of zero elements."""
-    a = np.asarray(g_a, dtype=np.float64).ravel()
-    b = np.asarray(g_b, dtype=np.float64).ravel()
-    return {"zero_in_a": float(np.mean(a == 0)), "zero_in_b": float(np.mean(b == 0)),
-            "zero_in_both": float(np.mean((a == 0) & (b == 0)))}
+    """Zero COUNTS in each vector and in their intersection (D09 provenance)."""
+    a, b = _checked(g_a), _checked(g_b)
+    return {"n_elements": int(a.size), "zero_count_a": int(np.sum(a == 0)),
+            "zero_count_b": int(np.sum(b == 0)), "zero_count_both": int(np.sum((a == 0) & (b == 0)))}
+
+
+def gradient_stats(g_candidate: np.ndarray, g_retention: np.ndarray) -> Dict:
+    """All three D09 features plus the provenance to log with them.
+
+    ``g_candidate`` / ``g_retention`` are the flat gradients of the D08 mean
+    answer NLL on the candidate batch and on the pinned retention subset, at the
+    same parent.  Empty or non-finite input raises.
+    """
+    cos, flags = cosine_with_diagnostic(g_candidate, g_retention)
+    return {"grad_norm": grad_l2_norm(g_candidate), "grad_cosine_retention": cos,
+            "sign_agreement": sign_agreement(g_candidate, g_retention),
+            "diagnostics": {**flags, **zero_sign_stats(g_candidate, g_retention),
+                            "retention_grad_norm": grad_l2_norm(g_retention)}}
 
 
 def module_energy(grad_a: np.ndarray, grad_b: np.ndarray) -> float:
@@ -311,24 +359,44 @@ def _log_softmax(logits: np.ndarray) -> np.ndarray:
     return z - np.log(np.exp(z).sum(axis=-1, keepdims=True))
 
 
-def mean_token_kl(logits_pre: np.ndarray, logits_post: np.ndarray,
-                  mask: Optional[np.ndarray] = None) -> float:
-    """``kl_drift_anchor``: mean over valid tokens of KL(p_pre || p_post).
+def kl_drift_anchor(logits_pre: np.ndarray, logits_post: np.ndarray, answer_ids: Sequence[int],
+                    valid_mask: Optional[Sequence[bool]] = None) -> float:
+    """D12 ``kl_drift_anchor``: KL(p_parent || p_post-probe), full vocabulary, natural log.
 
-    Teacher-forced on fixed anchor sequences, full vocabulary, natural log.
-    ``logits_*`` are [tokens, vocab] (flatten batch x time first); ``mask`` is
-    [tokens] with 1 for answer tokens, so padding never contributes.
+    Teacher-forced on fixed anchor contexts.  Per-position KL is averaged over
+    the VALID answer positions WITHIN each answer, then those per-answer means
+    are averaged with equal weight (a long answer does not dominate).
+    ``logits_*`` are [positions, vocab]; ``answer_ids[i]`` names the answer of
+    position i; ``valid_mask`` is 1 for answer positions (excludes prompt,
+    padding, special tokens).  An answer with no valid position, or no answer at
+    all, raises.
     """
     a = np.asarray(logits_pre, dtype=np.float64)
     b = np.asarray(logits_post, dtype=np.float64)
-    if a.shape != b.shape or a.ndim != 2:
-        raise ValueError("logits must be matching [tokens, vocab] arrays")
-    m = np.ones(a.shape[0], dtype=bool) if mask is None else np.asarray(mask).astype(bool)
-    if m.shape != (a.shape[0],) or not m.any():
-        raise ValueError("mask must select at least one token")
-    lp, lq = _log_softmax(a[m]), _log_softmax(b[m])
-    kl = (np.exp(lp) * (lp - lq)).sum(axis=-1)
-    return float(np.clip(kl, 0.0, None).mean())
+    ids = np.asarray(answer_ids)
+    if a.shape != b.shape or a.ndim != 2 or ids.shape != (a.shape[0],):
+        raise ValueError("need matching [positions, vocab] logits and one answer id per position")
+    valid = np.ones(a.shape[0], bool) if valid_mask is None else np.asarray(valid_mask).astype(bool)
+    if valid.shape != ids.shape or not valid.any():
+        raise ValueError("valid_mask must select at least one position")
+    if not (np.all(np.isfinite(a)) and np.all(np.isfinite(b))):
+        raise ValueError("non-finite logits")
+    lp, lq = _log_softmax(a), _log_softmax(b)
+    kl = np.clip((np.exp(lp) * (lp - lq)).sum(axis=-1), 0.0, None)
+    per_answer = []
+    for aid in np.unique(ids):
+        m = (ids == aid) & valid
+        if not m.any():
+            raise ValueError("answer %r has no valid position" % (aid,))
+        per_answer.append(kl[m].mean())
+    return float(np.mean(per_answer))
+
+
+def probe_loss(per_answer_token_nlls: Sequence[Sequence[float]]) -> float:
+    """Every probe loss (train steps 1..15; anchor and target at 0/5/10/15) uses the
+    D08 mean-of-per-answer-means NLL, so slopes are comparable.  The anchor and
+    target subsets must be the SAME fixed examples at every checkpoint."""
+    return mean_answer_nll(per_answer_token_nlls)
 
 
 def param_delta_norm(before: np.ndarray, after: np.ndarray) -> float:
