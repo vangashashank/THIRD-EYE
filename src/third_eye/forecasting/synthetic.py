@@ -22,7 +22,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from .data import MetaDataset, from_records
+from .data import MetaDataset, from_records, utility
 from .layout import CANDIDATE, STATE, FeatureLayout, H2_HEADS
 
 LABEL_SCALE = 0.03  # roughly "accuracy points"
@@ -97,7 +97,7 @@ def make_synthetic_records(
                     col = [0.0] * pad
                     for a in window:
                         if ch == "prev_accepted_value":
-                            col.append(float(np.mean(a)))
+                            col.append(float(utility(a)))
                         elif ch == "prev_target_change":
                             col.append(float(a[0]))
                         elif ch == "prev_ood_change":

@@ -122,6 +122,7 @@ def validate_records(
     history_tolerance: float = 1e-3,
     history_rule: str = "applied_h1",
     expected_semantic_hash: Optional[str] = None,
+    history_weights: Sequence[float] = DEFAULT_WEIGHTS,
 ) -> ValidationReport:
     """Hard-fail on contract violations; return soft warnings.
 
@@ -192,6 +193,17 @@ def validate_records(
                     _finite(v, "%s history[%s]" % (where, ch))
                     if m == 0 and v != 0:
                         raise RecordError("%s: masked history value must be 0" % where)
+            if {"prev_accepted_value", "prev_target_change", "prev_ood_change",
+                    "prev_retention_change"} <= set(channels):
+                vals = h["values"]
+                for k in range(H):
+                    expect = float(utility([vals["prev_target_change"][k], vals["prev_ood_change"][k],
+                                            vals["prev_retention_change"][k]], history_weights))
+                    if abs(vals["prev_accepted_value"][k] - expect) > 1e-4:
+                        raise RecordError(
+                            "%s: prev_accepted_value[%d]=%g but the lhv2 utility of that slot's "
+                            "deltas is %g (D10: it must be the utility of the one-step deltas)"
+                            % (where, k, vals["prev_accepted_value"][k], expect))
             want = expected_history_count(r["state_id"], H, history_rule)
             if strict_history_count and sum(mask) != want:
                 raise RecordError("%s: history has %d real entries but rule %s expects %d "

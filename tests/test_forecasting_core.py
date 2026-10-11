@@ -210,6 +210,7 @@ class RecordValidationTests(unittest.TestCase):
         for r in recs:
             if r["state_id"] == 2:
                 r["history"]["values"]["prev_target_change"][-1] += 5.0
+                r["history"]["values"]["prev_accepted_value"][-1] += 5.0 * DEFAULT_WEIGHTS[0]  # stay consistent
         rep = validate_records(recs, LAYOUT)
         self.assertTrue(any("history alignment" in w for w in rep.warnings))
 
@@ -527,6 +528,21 @@ class DecisionUpdateTests(unittest.TestCase):
         validate_records(h2, LAYOUT, history_rule="applied_h2")
         with self.assertRaises(RecordError):                               # wrong rule is caught
             validate_records(h2, LAYOUT, history_rule="applied_h1")
+
+    def test_d10_prev_accepted_value_is_the_lhv2_utility_of_the_slot(self):
+        recs = make_synthetic_records(LAYOUT, n_trajectories=3, seed=1)
+        validate_records(recs, LAYOUT)
+        r = next(x for x in recs if x["state_id"] == 3)
+        want = utility([r["history"]["values"]["prev_target_change"][-1],
+                        r["history"]["values"]["prev_ood_change"][-1],
+                        r["history"]["values"]["prev_retention_change"][-1]])
+        self.assertAlmostEqual(r["history"]["values"]["prev_accepted_value"][-1], float(want))
+        bad = copy.deepcopy(recs)
+        for x in bad:
+            if x["state_id"] == 3:
+                x["history"]["values"]["prev_accepted_value"][-1] += 0.05
+        with self.assertRaises(RecordError):
+            validate_records(bad, LAYOUT)
 
     def test_d02_group_ids_fixed_split_and_validation(self):
         recs = make_synthetic_records(LAYOUT, n_trajectories=12, states_per_trajectory=3, n_groups=6, seed=2)
